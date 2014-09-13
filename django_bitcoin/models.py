@@ -664,7 +664,7 @@ class Wallet(models.Model):
             updated = BitcoinAddress.objects.select_for_update().filter(Q(id=addr.id) & Q(active=True) & Q(least_received__lte=0) & Q(wallet__isnull=True))\
                           .update(active=True, wallet=self)
             print "addr_id", addr.id, updated
-            # db_transaction.commit()
+            db_transaction.commit()
             if updated:
                 return addr.address
             else:
