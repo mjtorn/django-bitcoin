@@ -15,7 +15,7 @@ from django_bitcoin.utils import *
 from django_bitcoin.utils import bitcoind
 from django_bitcoin import settings
 
-from django.utils.translation import ugettext as _
+from django.utils.translation import ugettext_lazy as _
 
 import django.dispatch
 
