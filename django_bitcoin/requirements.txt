@@ -1,3 +1,7 @@
 south
 pillow
 qrcode
+pytz
+celery
+distributedlock
+
