@@ -388,24 +388,24 @@ class BitcoinAddress(models.Model):
 
 def new_bitcoin_address():
     while True:
-        with db_transaction.autocommit():
-            db_transaction.enter_transaction_management()
+        db_transaction.enter_transaction_management()
+        db_transaction.commit()
+        bp = BitcoinAddress.objects.filter(Q(active=False) & Q(wallet__isnull=True) & \
+                Q(least_received__lte=0))
+        if len(bp) < 1:
+            refill_payment_queue()
             db_transaction.commit()
-            bp = BitcoinAddress.objects.filter(Q(active=False) & Q(wallet__isnull=True) & \
-                    Q(least_received__lte=0))
-            if len(bp) < 1:
-                refill_payment_queue()
-                db_transaction.commit()
-                print "refilling queue...", bp
+            print "refilling queue...", bp
+        else:
+            bp = bp[0]
+            updated = BitcoinAddress.objects.select_for_update().filter(Q(id=bp.id) & Q(active=False) & Q(wallet__isnull=True) & \
+                Q(least_received__lte=0)).update(active=True)
+            db_transaction.commit()
+            if updated:
+                print 'returning bp', bp
+                return bp
             else:
-                bp = bp[0]
-                updated = BitcoinAddress.objects.select_for_update().filter(Q(id=bp.id) & Q(active=False) & Q(wallet__isnull=True) & \
-                    Q(least_received__lte=0)).update(active=True)
-                db_transaction.commit()
-                if updated:
-                    return bp
-                else:
-                    print "wallet transaction concurrency:", bp.address
+                print "wallet transaction concurrency:", bp.address
 
 
 class Payment(models.Model):
@@ -628,7 +628,7 @@ from django.db.models import Q
 
 class Wallet(models.Model):
     created_at = models.DateTimeField(auto_now_add=True)
-    updated_at = models.DateTimeField()
+    updated_at = models.DateTimeField(auto_now=True)
 
     label = models.CharField(max_length=50, blank=True)
     # DEPRECATED: changed to foreign key
@@ -652,12 +652,6 @@ class Wallet(models.Model):
     def __unicode__(self):
         return u"%s: %s" % (self.label,
                             self.created_at.strftime('%Y-%m-%d %H:%M'))
-
-    def save(self, *args, **kwargs):
-        '''No need for labels.'''
-        self.updated_at = timezone.now()
-        super(Wallet, self).save(*args, **kwargs)
-        #super(Wallet, self).save(*args, **kwargs)
 
     def receiving_address(self, fresh_addr=True):
         while True:
