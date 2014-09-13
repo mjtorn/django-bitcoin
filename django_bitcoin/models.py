@@ -8,6 +8,7 @@ import pytz
 from decimal import Decimal
 
 from django.db import models
+from django.utils import timezone
 from django.contrib.sites.models import Site
 from django.contrib.auth.models import User
 
@@ -61,7 +62,7 @@ confirmation_choices = (
 )
 
 class Transaction(models.Model):
-    created_at = models.DateTimeField(default=datetime.datetime.now)
+    created_at = models.DateTimeField(auto_now_add=True)
     amount = models.DecimalField(
         max_digits=16,
         decimal_places=8,
@@ -71,7 +72,7 @@ class Transaction(models.Model):
 
 class DepositTransaction(models.Model):
 
-    created_at = models.DateTimeField(default=datetime.datetime.now)
+    created_at = models.DateTimeField(auto_now_add=True)
     address = models.ForeignKey('BitcoinAddress')
 
     amount = models.DecimalField(max_digits=16, decimal_places=8, default=Decimal(0))
@@ -89,7 +90,7 @@ class DepositTransaction(models.Model):
         return self.address.address + u", " + unicode(self.amount)
 
 # class BitcoinBlock(models.Model):
-#     created_at = models.DateTimeField(default=datetime.datetime.now)
+#     created_at = models.DateTimeField(auto_now_add=True)
 #     blockhash = models.CharField(max_length=100)
 #     blockheight = models.IntegerField()
 #     confirmations = models.IntegerField(default=0)
@@ -97,8 +98,8 @@ class DepositTransaction(models.Model):
 
 class OutgoingTransaction(models.Model):
 
-    created_at = models.DateTimeField(default=datetime.datetime.now)
-    expires_at = models.DateTimeField(default=datetime.datetime.now)
+    created_at = models.DateTimeField(auto_now_add=True)
+    expires_at = models.DateTimeField(auto_now_add=True)
     executed_at = models.DateTimeField(null=True,default=None)
     under_execution = models.BooleanField(default=False) # execution fail
     to_bitcoinaddress = models.CharField(
@@ -139,7 +140,7 @@ from time import sleep
 #         for ot in OutgoingTransaction.objects.filter(executed_at=None)[:3]:
 #             result = None
 #             updated = OutgoingTransaction.objects.filter(id=ot.id,
-#                 executed_at=None, txid=None, under_execution=False).select_for_update().update(executed_at=datetime.datetime.now(), txid=result)
+#                 executed_at=None, txid=None, under_execution=False).select_for_update().update(executed_at=timezone.now(), txid=result)
 #             db_transaction.commit()
 #             if updated:
 #                 try:
@@ -199,7 +200,7 @@ def filter_doubles(outgoing_list):
 @task()
 @db_transaction.autocommit
 def process_outgoing_transactions():
-    if OutgoingTransaction.objects.filter(executed_at=None, expires_at__lte=datetime.datetime.now()).count()>0 or \
+    if OutgoingTransaction.objects.filter(executed_at=None, expires_at__lte=timezone.now()).count()>0 or \
         OutgoingTransaction.objects.filter(executed_at=None).count()>6:
         blockcount = bitcoind.bitcoind_api.getblockcount()
         with NonBlockingCacheLock('process_outgoing_transactions'):
@@ -210,7 +211,7 @@ def process_outgoing_transactions():
             for ot in ots:
                 transaction_hash[ot.to_bitcoinaddress] = float(ot.amount)
             updated = OutgoingTransaction.objects.filter(id__in=ots_ids,
-                executed_at=None).select_for_update().update(executed_at=datetime.datetime.now())
+                executed_at=None).select_for_update().update(executed_at=timezone.now())
             if updated == len(ots):
                 try:
                     result = bitcoind.sendmany(transaction_hash)
@@ -250,12 +251,12 @@ def process_outgoing_transactions():
     #     next_run_at = OutgoingTransaction.objects.filter(executed_at=None).aggregate(Min('expires_at'))['expires_at__min']
     #     if next_run_at:
     #         process_outgoing_transactions.retry(
-    #             countdown=max(((next_run_at - datetime.datetime.now(pytz.utc)) + datetime.timedelta(seconds=5)).total_seconds(), 5))
+    #             countdown=max(((next_run_at - timezone.now(pytz.utc)) + datetime.timedelta(seconds=5)).total_seconds(), 5))
 
 
 class BitcoinAddress(models.Model):
     address = models.CharField(max_length=50, unique=True)
-    created_at = models.DateTimeField(default=datetime.datetime.now)
+    created_at = models.DateTimeField(auto_now_add=True)
     active = models.BooleanField(default=False)
     least_received = models.DecimalField(max_digits=16, decimal_places=8, default=Decimal(0))
     least_received_confirmed = models.DecimalField(max_digits=16, decimal_places=8, default=Decimal(0))
@@ -423,7 +424,7 @@ class Payment(models.Model):
         default=Decimal("0.0"))
     active = models.BooleanField(default=False)
 
-    created_at = models.DateTimeField(default=datetime.datetime.now)
+    created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField()
 
     paid_at = models.DateTimeField(null=True, default=None)
@@ -513,7 +514,7 @@ class Payment(models.Model):
                 [str(x) for x in addresses_shares.values()])
             bp.withdraw_amounts=",".join(
                 [str(x) for x in am])
-            bp.withdrawn_at=datetime.datetime.now()
+            bp.withdrawn_at=timezone.now()
             bp.withdrawn_total=sum(am)
             bp.save()
         for i, share in enumerate(addresses_shares.keys()):
@@ -534,9 +535,9 @@ class Payment(models.Model):
         print "blaa", new_amount, self.address
         if new_amount>=self.amount:
             self.amount_paid=new_amount
-            self.paid_at=datetime.datetime.now()
+            self.paid_at=timezone.now()
             self.save()
-        #elif (datetime.datetime.now()-self.updated_at)>datetime.timedelta(hours=PAYMENT_VALID_HOURS):
+        #elif (timezone.now()-self.updated_at)>datetime.timedelta(hours=PAYMENT_VALID_HOURS):
         #    self.deactivate()
 
     def deactivate(self):
@@ -549,7 +550,7 @@ class Payment(models.Model):
         return True
 
     def save(self, **kwargs):
-        self.updated_at = datetime.datetime.now()
+        self.updated_at = timezone.now()
         return super(Payment, self).save(**kwargs)
 
     def __unicode__(self):
@@ -560,7 +561,7 @@ class Payment(models.Model):
         return ('view_or_url_name',)
 
 class WalletTransaction(models.Model):
-    created_at = models.DateTimeField(default=datetime.datetime.now)
+    created_at = models.DateTimeField(auto_now_add=True)
     from_wallet = models.ForeignKey(
         'Wallet',
         null=True,
@@ -626,7 +627,7 @@ class WalletTransaction(models.Model):
 from django.db.models import Q
 
 class Wallet(models.Model):
-    created_at = models.DateTimeField(default=datetime.datetime.now)
+    created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField()
 
     label = models.CharField(max_length=50, blank=True)
@@ -654,7 +655,7 @@ class Wallet(models.Model):
 
     def save(self, *args, **kwargs):
         '''No need for labels.'''
-        self.updated_at = datetime.datetime.now()
+        self.updated_at = timezone.now()
         super(Wallet, self).save(*args, **kwargs)
         #super(Wallet, self).save(*args, **kwargs)
 
@@ -765,7 +766,7 @@ class Wallet(models.Model):
                 raise Exception(_("Concurrency error with transactions. Please try again."))
             # concurrency check end
             outgoing_transaction = OutgoingTransaction.objects.create(amount=amount, to_bitcoinaddress=address,
-                expires_at=datetime.datetime.now()+datetime.timedelta(seconds=expires_seconds))
+                expires_at=timezone.now()+datetime.timedelta(seconds=expires_seconds))
             bwt = WalletTransaction.objects.create(
                 amount=amount,
                 from_wallet=self,
@@ -808,7 +809,7 @@ class Wallet(models.Model):
         Finds the timestamp from the oldest transaction found with wasn't yet
         confirmed. If none, returns the current timestamp.
         """
-        if mincf == 0: return datetime.datetime.now()
+        if mincf == 0: return timezone.now()
 
         transactions_checked = "bitcoin_transactions_checked_%d" % mincf
         oldest_unconfirmed = "bitcoin_oldest_unconfirmed_%d" % mincf
@@ -817,7 +818,7 @@ class Wallet(models.Model):
             return cache.get(oldest_unconfirmed)
         else:
             cache.set(transactions_checked, True, 60*15)
-            current_timestamp = datetime.datetime.now()
+            current_timestamp = timezone.now()
             transactions = WalletTransaction.objects.all()
             oldest = cache.get(oldest_unconfirmed)
             if oldest:
@@ -957,7 +958,7 @@ class Wallet(models.Model):
             transaction.commit_unless_managed()
 
     # def save(self, **kwargs):
-    #     self.updated_at = datetime.datetime.now()
+    #     self.updated_at = timezone.now()
     #     super(Wallet, self).save(**kwargs)
 
 ### Maybe in the future
@@ -1077,7 +1078,7 @@ def set_historical_price(curr="EUR"):
     # print markets_currency
     price = sum([m['avg'] for m in markets_currency]) / len(markets_currency)
     hp = HistoricalPrice.objects.create(price=Decimal(str(price)), params=",".join([m['symbol']+"_avg" for m in markets_currency]), currency=curr,
-            created_at=datetime.datetime.now())
+            created_at=timezone.now())
     print "Created new",hp
     return hp
 
@@ -1090,9 +1091,9 @@ def get_historical_price_object(dt=None, curr="EUR"):
         except IndexError:
             return None
     try:
-        # print datetime.datetime.now()
+        # print timezone.now()
         query=HistoricalPrice.objects.filter(currency=curr,
-            created_at__gte=datetime.datetime.now() - datetime.timedelta(minutes=settings.HISTORICALPRICES_FETCH_TIMESPAN_MINUTES)).\
+            created_at__gte=timezone.now() - datetime.timedelta(minutes=settings.HISTORICALPRICES_FETCH_TIMESPAN_MINUTES)).\
             order_by("-created_at")
         # print query
         return query[0]
