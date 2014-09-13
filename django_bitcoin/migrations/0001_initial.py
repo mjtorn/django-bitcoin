@@ -1,158 +1,172 @@
-# encoding: utf-8
+# -*- coding: utf-8 -*-
+from __future__ import unicode_literals
+
+from django.db import models, migrations
 import datetime
-from south.db import db
-from south.v2 import SchemaMigration
-from django.db import models
-
-class Migration(SchemaMigration):
-
-    def forwards(self, orm):
-        
-        # Adding model 'Transaction'
-        db.create_table('django_bitcoin_transaction', (
-            ('id', self.gf('django.db.models.fields.AutoField')(primary_key=True)),
-            ('created_at', self.gf('django.db.models.fields.DateTimeField')(default=datetime.datetime.now)),
-            ('amount', self.gf('django.db.models.fields.DecimalField')(default='0.0', max_digits=16, decimal_places=8)),
-            ('address', self.gf('django.db.models.fields.CharField')(max_length=50)),
-        ))
-        db.send_create_signal('django_bitcoin', ['Transaction'])
-
-        # Adding model 'BitcoinAddress'
-        db.create_table('django_bitcoin_bitcoinaddress', (
-            ('id', self.gf('django.db.models.fields.AutoField')(primary_key=True)),
-            ('address', self.gf('django.db.models.fields.CharField')(max_length=50, blank=True)),
-            ('created_at', self.gf('django.db.models.fields.DateTimeField')(default=datetime.datetime.now)),
-            ('active', self.gf('django.db.models.fields.BooleanField')(default=False)),
-            ('least_received', self.gf('django.db.models.fields.DecimalField')(default='0', max_digits=16, decimal_places=8)),
-        ))
-        db.send_create_signal('django_bitcoin', ['BitcoinAddress'])
-
-        # Adding model 'Payment'
-        db.create_table('django_bitcoin_payment', (
-            ('id', self.gf('django.db.models.fields.AutoField')(primary_key=True)),
-            ('description', self.gf('django.db.models.fields.CharField')(max_length=255, blank=True)),
-            ('address', self.gf('django.db.models.fields.CharField')(max_length=50)),
-            ('amount', self.gf('django.db.models.fields.DecimalField')(default='0.0', max_digits=16, decimal_places=8)),
-            ('amount_paid', self.gf('django.db.models.fields.DecimalField')(default='0.0', max_digits=16, decimal_places=8)),
-            ('active', self.gf('django.db.models.fields.BooleanField')(default=False)),
-            ('created_at', self.gf('django.db.models.fields.DateTimeField')(default=datetime.datetime.now)),
-            ('updated_at', self.gf('django.db.models.fields.DateTimeField')()),
-            ('paid_at', self.gf('django.db.models.fields.DateTimeField')(default=None, null=True)),
-            ('withdrawn_total', self.gf('django.db.models.fields.DecimalField')(default='0.0', max_digits=16, decimal_places=8)),
-        ))
-        db.send_create_signal('django_bitcoin', ['Payment'])
-
-        # Adding M2M table for field transactions on 'Payment'
-        db.create_table('django_bitcoin_payment_transactions', (
-            ('id', models.AutoField(verbose_name='ID', primary_key=True, auto_created=True)),
-            ('payment', models.ForeignKey(orm['django_bitcoin.payment'], null=False)),
-            ('transaction', models.ForeignKey(orm['django_bitcoin.transaction'], null=False))
-        ))
-        db.create_unique('django_bitcoin_payment_transactions', ['payment_id', 'transaction_id'])
-
-        # Adding model 'WalletTransaction'
-        db.create_table('django_bitcoin_wallettransaction', (
-            ('id', self.gf('django.db.models.fields.AutoField')(primary_key=True)),
-            ('created_at', self.gf('django.db.models.fields.DateTimeField')(default=datetime.datetime.now)),
-            ('from_wallet', self.gf('django.db.models.fields.related.ForeignKey')(related_name='sent_transactions', to=orm['django_bitcoin.Wallet'])),
-            ('to_wallet', self.gf('django.db.models.fields.related.ForeignKey')(related_name='received_transactions', null=True, to=orm['django_bitcoin.Wallet'])),
-            ('to_bitcoinaddress', self.gf('django.db.models.fields.CharField')(max_length=50, blank=True)),
-            ('amount', self.gf('django.db.models.fields.DecimalField')(default='0.0', max_digits=16, decimal_places=8)),
-            ('description', self.gf('django.db.models.fields.CharField')(max_length=100, blank=True)),
-        ))
-        db.send_create_signal('django_bitcoin', ['WalletTransaction'])
-
-        # Adding model 'Wallet'
-        db.create_table('django_bitcoin_wallet', (
-            ('id', self.gf('django.db.models.fields.AutoField')(primary_key=True)),
-            ('created_at', self.gf('django.db.models.fields.DateTimeField')(default=datetime.datetime.now)),
-            ('updated_at', self.gf('django.db.models.fields.DateTimeField')()),
-            ('label', self.gf('django.db.models.fields.CharField')(max_length=50, blank=True)),
-        ))
-        db.send_create_signal('django_bitcoin', ['Wallet'])
-
-        # Adding M2M table for field addresses on 'Wallet'
-        db.create_table('django_bitcoin_wallet_addresses', (
-            ('id', models.AutoField(verbose_name='ID', primary_key=True, auto_created=True)),
-            ('wallet', models.ForeignKey(orm['django_bitcoin.wallet'], null=False)),
-            ('bitcoinaddress', models.ForeignKey(orm['django_bitcoin.bitcoinaddress'], null=False))
-        ))
-        db.create_unique('django_bitcoin_wallet_addresses', ['wallet_id', 'bitcoinaddress_id'])
+from decimal import Decimal
 
 
-    def backwards(self, orm):
-        
-        # Deleting model 'Transaction'
-        db.delete_table('django_bitcoin_transaction')
+class Migration(migrations.Migration):
 
-        # Deleting model 'BitcoinAddress'
-        db.delete_table('django_bitcoin_bitcoinaddress')
+    dependencies = [
+    ]
 
-        # Deleting model 'Payment'
-        db.delete_table('django_bitcoin_payment')
-
-        # Removing M2M table for field transactions on 'Payment'
-        db.delete_table('django_bitcoin_payment_transactions')
-
-        # Deleting model 'WalletTransaction'
-        db.delete_table('django_bitcoin_wallettransaction')
-
-        # Deleting model 'Wallet'
-        db.delete_table('django_bitcoin_wallet')
-
-        # Removing M2M table for field addresses on 'Wallet'
-        db.delete_table('django_bitcoin_wallet_addresses')
-
-
-    models = {
-        'django_bitcoin.bitcoinaddress': {
-            'Meta': {'object_name': 'BitcoinAddress'},
-            'active': ('django.db.models.fields.BooleanField', [], {'default': 'False'}),
-            'address': ('django.db.models.fields.CharField', [], {'max_length': '50', 'blank': 'True'}),
-            'created_at': ('django.db.models.fields.DateTimeField', [], {'default': 'datetime.datetime.now'}),
-            'id': ('django.db.models.fields.AutoField', [], {'primary_key': 'True'}),
-            'least_received': ('django.db.models.fields.DecimalField', [], {'default': "'0'", 'max_digits': '16', 'decimal_places': '8'})
-        },
-        'django_bitcoin.payment': {
-            'Meta': {'object_name': 'Payment'},
-            'active': ('django.db.models.fields.BooleanField', [], {'default': 'False'}),
-            'address': ('django.db.models.fields.CharField', [], {'max_length': '50'}),
-            'amount': ('django.db.models.fields.DecimalField', [], {'default': "'0.0'", 'max_digits': '16', 'decimal_places': '8'}),
-            'amount_paid': ('django.db.models.fields.DecimalField', [], {'default': "'0.0'", 'max_digits': '16', 'decimal_places': '8'}),
-            'created_at': ('django.db.models.fields.DateTimeField', [], {'default': 'datetime.datetime.now'}),
-            'description': ('django.db.models.fields.CharField', [], {'max_length': '255', 'blank': 'True'}),
-            'id': ('django.db.models.fields.AutoField', [], {'primary_key': 'True'}),
-            'paid_at': ('django.db.models.fields.DateTimeField', [], {'default': 'None', 'null': 'True'}),
-            'transactions': ('django.db.models.fields.related.ManyToManyField', [], {'to': "orm['django_bitcoin.Transaction']", 'symmetrical': 'False'}),
-            'updated_at': ('django.db.models.fields.DateTimeField', [], {}),
-            'withdrawn_total': ('django.db.models.fields.DecimalField', [], {'default': "'0.0'", 'max_digits': '16', 'decimal_places': '8'})
-        },
-        'django_bitcoin.transaction': {
-            'Meta': {'object_name': 'Transaction'},
-            'address': ('django.db.models.fields.CharField', [], {'max_length': '50'}),
-            'amount': ('django.db.models.fields.DecimalField', [], {'default': "'0.0'", 'max_digits': '16', 'decimal_places': '8'}),
-            'created_at': ('django.db.models.fields.DateTimeField', [], {'default': 'datetime.datetime.now'}),
-            'id': ('django.db.models.fields.AutoField', [], {'primary_key': 'True'})
-        },
-        'django_bitcoin.wallet': {
-            'Meta': {'object_name': 'Wallet'},
-            'addresses': ('django.db.models.fields.related.ManyToManyField', [], {'to': "orm['django_bitcoin.BitcoinAddress']", 'symmetrical': 'False'}),
-            'created_at': ('django.db.models.fields.DateTimeField', [], {'default': 'datetime.datetime.now'}),
-            'id': ('django.db.models.fields.AutoField', [], {'primary_key': 'True'}),
-            'label': ('django.db.models.fields.CharField', [], {'max_length': '50', 'blank': 'True'}),
-            'transactions_with': ('django.db.models.fields.related.ManyToManyField', [], {'to': "orm['django_bitcoin.Wallet']", 'through': "orm['django_bitcoin.WalletTransaction']", 'symmetrical': 'False'}),
-            'updated_at': ('django.db.models.fields.DateTimeField', [], {})
-        },
-        'django_bitcoin.wallettransaction': {
-            'Meta': {'object_name': 'WalletTransaction'},
-            'amount': ('django.db.models.fields.DecimalField', [], {'default': "'0.0'", 'max_digits': '16', 'decimal_places': '8'}),
-            'created_at': ('django.db.models.fields.DateTimeField', [], {'default': 'datetime.datetime.now'}),
-            'description': ('django.db.models.fields.CharField', [], {'max_length': '100', 'blank': 'True'}),
-            'from_wallet': ('django.db.models.fields.related.ForeignKey', [], {'related_name': "'sent_transactions'", 'to': "orm['django_bitcoin.Wallet']"}),
-            'id': ('django.db.models.fields.AutoField', [], {'primary_key': 'True'}),
-            'to_bitcoinaddress': ('django.db.models.fields.CharField', [], {'max_length': '50', 'blank': 'True'}),
-            'to_wallet': ('django.db.models.fields.related.ForeignKey', [], {'related_name': "'received_transactions'", 'null': 'True', 'to': "orm['django_bitcoin.Wallet']"})
-        }
-    }
-
-    complete_apps = ['django_bitcoin']
+    operations = [
+        migrations.CreateModel(
+            name='BitcoinAddress',
+            fields=[
+                ('id', models.AutoField(verbose_name='ID', serialize=False, auto_created=True, primary_key=True)),
+                ('address', models.CharField(unique=True, max_length=50)),
+                ('created_at', models.DateTimeField(auto_now_add=True)),
+                ('active', models.BooleanField(default=False)),
+                ('least_received', models.DecimalField(default=Decimal('0'), max_digits=16, decimal_places=8)),
+                ('least_received_confirmed', models.DecimalField(default=Decimal('0'), max_digits=16, decimal_places=8)),
+                ('label', models.CharField(default=None, max_length=50, null=True, blank=True)),
+                ('migrated_to_transactions', models.BooleanField(default=True)),
+            ],
+            options={
+                'verbose_name_plural': 'Bitcoin addresses',
+            },
+            bases=(models.Model,),
+        ),
+        migrations.CreateModel(
+            name='DepositTransaction',
+            fields=[
+                ('id', models.AutoField(verbose_name='ID', serialize=False, auto_created=True, primary_key=True)),
+                ('created_at', models.DateTimeField(auto_now_add=True)),
+                ('amount', models.DecimalField(default=Decimal('0'), max_digits=16, decimal_places=8)),
+                ('description', models.CharField(default=None, max_length=100, null=True, blank=True)),
+                ('under_execution', models.BooleanField(default=False)),
+                ('confirmations', models.IntegerField(default=0)),
+                ('txid', models.CharField(max_length=100, null=True, blank=True)),
+                ('address', models.ForeignKey(to='django_bitcoin.BitcoinAddress')),
+            ],
+            options={
+            },
+            bases=(models.Model,),
+        ),
+        migrations.CreateModel(
+            name='HistoricalPrice',
+            fields=[
+                ('id', models.AutoField(verbose_name='ID', serialize=False, auto_created=True, primary_key=True)),
+                ('created_at', models.DateTimeField(auto_now_add=True)),
+                ('price', models.DecimalField(max_digits=16, decimal_places=2)),
+                ('params', models.CharField(max_length=50)),
+                ('currency', models.CharField(max_length=10)),
+            ],
+            options={
+                'verbose_name': 'HistoricalPrice',
+                'verbose_name_plural': 'HistoricalPrices',
+            },
+            bases=(models.Model,),
+        ),
+        migrations.CreateModel(
+            name='OutgoingTransaction',
+            fields=[
+                ('id', models.AutoField(verbose_name='ID', serialize=False, auto_created=True, primary_key=True)),
+                ('created_at', models.DateTimeField(auto_now_add=True)),
+                ('expires_at', models.DateTimeField(auto_now_add=True)),
+                ('executed_at', models.DateTimeField(default=None, null=True)),
+                ('under_execution', models.BooleanField(default=False)),
+                ('to_bitcoinaddress', models.CharField(max_length=50, blank=True)),
+                ('amount', models.DecimalField(default=Decimal('0.0'), max_digits=16, decimal_places=8)),
+                ('txid', models.CharField(default=None, max_length=100, null=True, blank=True)),
+            ],
+            options={
+            },
+            bases=(models.Model,),
+        ),
+        migrations.CreateModel(
+            name='Payment',
+            fields=[
+                ('id', models.AutoField(verbose_name='ID', serialize=False, auto_created=True, primary_key=True)),
+                ('description', models.CharField(max_length=255, blank=True)),
+                ('address', models.CharField(max_length=50)),
+                ('amount', models.DecimalField(default=Decimal('0.0'), max_digits=16, decimal_places=8)),
+                ('amount_paid', models.DecimalField(default=Decimal('0.0'), max_digits=16, decimal_places=8)),
+                ('active', models.BooleanField(default=False)),
+                ('created_at', models.DateTimeField(auto_now_add=True)),
+                ('updated_at', models.DateTimeField()),
+                ('paid_at', models.DateTimeField(default=None, null=True)),
+                ('withdrawn_total', models.DecimalField(default=Decimal('0.0'), max_digits=16, decimal_places=8)),
+            ],
+            options={
+            },
+            bases=(models.Model,),
+        ),
+        migrations.CreateModel(
+            name='Transaction',
+            fields=[
+                ('id', models.AutoField(verbose_name='ID', serialize=False, auto_created=True, primary_key=True)),
+                ('created_at', models.DateTimeField(auto_now_add=True)),
+                ('amount', models.DecimalField(default=Decimal('0.0'), max_digits=16, decimal_places=8)),
+                ('address', models.CharField(max_length=50)),
+            ],
+            options={
+            },
+            bases=(models.Model,),
+        ),
+        migrations.CreateModel(
+            name='Wallet',
+            fields=[
+                ('id', models.AutoField(verbose_name='ID', serialize=False, auto_created=True, primary_key=True)),
+                ('created_at', models.DateTimeField(auto_now_add=True)),
+                ('updated_at', models.DateTimeField()),
+                ('label', models.CharField(max_length=50, blank=True)),
+                ('transaction_counter', models.IntegerField(default=1)),
+                ('last_balance', models.DecimalField(default=Decimal('0'), max_digits=16, decimal_places=8)),
+            ],
+            options={
+            },
+            bases=(models.Model,),
+        ),
+        migrations.CreateModel(
+            name='WalletTransaction',
+            fields=[
+                ('id', models.AutoField(verbose_name='ID', serialize=False, auto_created=True, primary_key=True)),
+                ('created_at', models.DateTimeField(auto_now_add=True)),
+                ('to_bitcoinaddress', models.CharField(max_length=50, blank=True)),
+                ('amount', models.DecimalField(default=Decimal('0.0'), max_digits=16, decimal_places=8)),
+                ('description', models.CharField(max_length=100, blank=True)),
+                ('txid', models.CharField(max_length=100, null=True, blank=True)),
+                ('deposit_address', models.ForeignKey(to='django_bitcoin.BitcoinAddress', null=True)),
+                ('deposit_transaction', models.OneToOneField(null=True, to='django_bitcoin.DepositTransaction')),
+                ('from_wallet', models.ForeignKey(related_name=b'sent_transactions', to='django_bitcoin.Wallet', null=True)),
+                ('outgoing_transaction', models.ForeignKey(default=None, to='django_bitcoin.OutgoingTransaction', null=True)),
+                ('to_wallet', models.ForeignKey(related_name=b'received_transactions', to='django_bitcoin.Wallet', null=True)),
+            ],
+            options={
+            },
+            bases=(models.Model,),
+        ),
+        migrations.AddField(
+            model_name='wallet',
+            name='transactions_with',
+            field=models.ManyToManyField(to='django_bitcoin.Wallet', through='django_bitcoin.WalletTransaction'),
+            preserve_default=True,
+        ),
+        migrations.AddField(
+            model_name='payment',
+            name='transactions',
+            field=models.ManyToManyField(to='django_bitcoin.Transaction'),
+            preserve_default=True,
+        ),
+        migrations.AddField(
+            model_name='deposittransaction',
+            name='transaction',
+            field=models.ForeignKey(default=None, to='django_bitcoin.WalletTransaction', null=True),
+            preserve_default=True,
+        ),
+        migrations.AddField(
+            model_name='deposittransaction',
+            name='wallet',
+            field=models.ForeignKey(to='django_bitcoin.Wallet'),
+            preserve_default=True,
+        ),
+        migrations.AddField(
+            model_name='bitcoinaddress',
+            name='wallet',
+            field=models.ForeignKey(related_name=b'addresses', to='django_bitcoin.Wallet', null=True),
+            preserve_default=True,
+        ),
+    ]
