@@ -18,7 +18,12 @@ Features
 Installation
 ============
 
-To install, just add the app to your settings.py INSTALLED_APPS like::
+``django-bitcoin`` requires ``memcached`` (for locks) in order to run,
+and whatever you want to use for your ``celery`` queue.
+
+Execute ``pip install -r django_bitcoin/requirements.txt``
+
+Finally, just add the app to your settings.py INSTALLED_APPS like::
 
     INSTALLED_APPS = [
         ...
@@ -32,11 +37,6 @@ Also you have to run a local bitcoind instance, and specify connection string in
 
 Usage
 =====
-
-Tutorial
----------
-
-`There is a small tutorial about how to use django-bitcoin to create your own instawallet <http://blog.kangasbros.fi/?p=85>`_.
 
 Wallet websites, escrow services using the "Wallet"-model
 ------------------------------------------------------------
@@ -148,8 +148,6 @@ Community
 Currently ``django-bitcoin`` is used at production in
 
 * `localbitcoins.com <http://localbitcoins.com>`_
-
-* `bountychest.com <http://bountychest.com>`_
 
 More to come!
 
