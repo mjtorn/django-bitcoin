@@ -23,6 +23,10 @@ and whatever you want to use for your ``celery`` queue.
 
 Execute ``pip install -r django_bitcoin/requirements.txt``
 
+If you want to use the mock objects included, note that ``mock==0.8.0``
+is required. The mocksignature feature was later dropped in favor of
+autospeccing, but ``django-bitcoin`` doesn't support that yet.
+
 Finally, just add the app to your settings.py INSTALLED_APPS like::
 
     INSTALLED_APPS = [
