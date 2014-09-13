@@ -1,4 +1,4 @@
-south
+south==1.0
 pillow
 qrcode
 pytz
