@@ -1,20 +1,10 @@
 from django.core.management.base import NoArgsCommand
 from django.conf import settings
-import os
-import sys
-import re
-import codecs
-import commands
-import urllib2
-import urllib
-import json
-import random
-from time import sleep
-import math
 from django_bitcoin.models import Wallet, BitcoinAddress, WalletTransaction, DepositTransaction
 from django_bitcoin.utils import bitcoind
-from django.db.models import Avg, Max, Min, Sum
+from django.db.models import Max, Sum
 from decimal import Decimal
+
 
 class Command(NoArgsCommand):
     help = 'This checks that alles is in ordnung in django_bitcoin.'
@@ -28,7 +18,7 @@ class Command(NoArgsCommand):
             .aggregate(Sum('amount'))['amount__sum'] or Decimal(0)
         print "Total transactions, sum", transaction_wallets_sum
         transaction_out_sum = WalletTransaction.objects.filter(from_wallet__id__gt=0)\
-        	.exclude(to_bitcoinaddress="").exclude(to_bitcoinaddress="")\
+            .exclude(to_bitcoinaddress="").exclude(to_bitcoinaddress="")\
             .aggregate(Sum('amount'))['amount__sum'] or Decimal(0)
         print "Total outgoing, sum", transaction_out_sum
         # for x in WalletTransaction.objects.filter(from_wallet__id__gt=0, to_wallet__isnull=True, to_bitcoinaddress=""):
@@ -44,7 +34,7 @@ class Command(NoArgsCommand):
         print "Wallet quick check"
         total_sum = Decimal(0)
         for w in Wallet.objects.filter(last_balance__lt=0):
-            if w.total_balance()<0:
+            if w.total_balance() < 0:
                 bal = w.total_balance()
                 # print w.id, bal
                 total_sum += bal
@@ -56,7 +46,7 @@ class Command(NoArgsCommand):
         tot_received_unmigrated = BitcoinAddress.objects.filter(migrated_to_transactions=False)\
             .aggregate(Sum('least_received_confirmed'))['least_received_confirmed__sum'] or Decimal(0)
         if tot_received != tot_received_bitcoinaddress:
-            raise Exception("wrong total receive amount! "+str(tot_received)+", "+str(tot_received_bitcoinaddress))
+            raise Exception("wrong total receive amount! " + str(tot_received) + ", " + str(tot_received_bitcoinaddress))
         print "Total " + str(tot_received) + " BTC deposits migrated, unmigrated " + str(tot_received_unmigrated) + " BTC"
         print "Migration check #2"
         dts = DepositTransaction.objects.filter(address__migrated_to_transactions=False).exclude(transaction=None)
@@ -94,5 +84,3 @@ class Command(NoArgsCommand):
                 print "Bitcoinaddress integrity error!", ba.address, deposit_sum, wt_sum, ba.least_received_confirmed
             # if random.random() < 0.001:
             #     sleep(1)
-
-
