@@ -4,6 +4,7 @@ from django.contrib import admin
 
 from django_bitcoin import models
 
+
 class TransactionAdmin(admin.ModelAdmin):
     """Management of ``Transaction`` - Disable address etc editing
     """
