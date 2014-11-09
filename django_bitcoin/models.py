@@ -806,45 +806,6 @@ def refill_payment_queue():
             BitcoinAddress.objects.create(address=bitcoind.create_address(), active=False)
 
 
-def update_payments():
-    if not cache.get('last_full_check'):
-        cache.set('bitcoinprice', cache.get('bitcoinprice_old'))
-    bps = BitcoinPayment.objects.filter(active=True)
-    for bp in bps:
-        bp.amount_paid = Decimal(bitcoind.total_received(bp.address))
-        bp.save()
-        print bp.amount
-        print bp.amount_paid
-
-
-@db_transaction.commit_on_success
-def new_bitcoin_payment(amount):
-    bp = BitcoinPayment.objects.filter(active=False)
-    if len(bp) < 1:
-        refill_payment_queue()
-        bp = BitcoinPayment.objects.filter(active=False)
-    bp = bp[0]
-    bp.active = True
-    bp.amount = amount
-    bp.save()
-    return bp
-
-
-def getNewBitcoinPayment(amount):
-    warnings.warn("Use new_bitcoin_payment(amount) instead",
-                  DeprecationWarning)
-    return new_bitcoin_payment(amount)
-
-
-@db_transaction.commit_on_success
-def new_bitcoin_payment_eur(amount):
-    return new_bitcoin_payment(Decimal(amount) / Decimal(currency.exchange.get_rate("EUR")))
-
-
-def getNewBitcoinPayment_eur(amount):
-    return new_bitcoin_payment_eur(amount)
-
-
 # Historical prie storage
 
 
