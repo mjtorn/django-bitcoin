@@ -22,7 +22,7 @@ import django.dispatch
 
 import jsonrpc
 
-from BCAddressField import is_valid_btc_address
+from .fields.utils import is_valid_btc_address
 
 from django.db import transaction as db_transaction
 from celery import task
