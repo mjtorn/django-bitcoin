@@ -911,7 +911,7 @@ def update_payments():
         print bp.amount
         print bp.amount_paid
 
-@transaction.commit_on_success
+@db_transaction.commit_on_success
 def new_bitcoin_payment(amount):
     bp=BitcoinPayment.objects.filter(active=False)
     if len(bp)<1:
@@ -928,7 +928,7 @@ def getNewBitcoinPayment(amount):
                   DeprecationWarning)
     return new_bitcoin_payment(amount)
 
-@transaction.commit_on_success
+@db_transaction.commit_on_success
 def new_bitcoin_payment_eur(amount):
     return new_bitcoin_payment(Decimal(amount)/Decimal(currency.exchange.get_rate("EUR")))
 
