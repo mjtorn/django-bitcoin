@@ -1,36 +1,23 @@
 from __future__ import with_statement
 
-import datetime
-import random
-import hashlib
-from decimal import Decimal
-
-from django.db import models
-
-from django_bitcoin.utils import bitcoind
+from django_bitcoin.bitcoind import bitcoind
 from django_bitcoin import settings
 
-from django.utils.translation import ugettext as _
 from django_bitcoin.models import DepositTransaction, BitcoinAddress
 
-import django.dispatch
-
-import jsonrpc
-
-from BCAddressField import is_valid_btc_address
-
-from django.db import transaction as db_transaction
 from celery import task
 from distributedlock import distributedlock, MemcachedLock, LockNotAcquiredError
 from django.core.cache import cache
 
 from django.core.mail import mail_admins
 
+
 def NonBlockingCacheLock(key, lock=None, blocking=False, timeout=10000):
     if lock is None:
         lock = MemcachedLock(key=key, client=cache, timeout=timeout)
 
     return distributedlock(key, lock, blocking)
+
 
 @task()
 def query_transactions():
@@ -45,7 +32,7 @@ def query_transactions():
         # print query_block, blockhash
         transactions = bitcoind.bitcoind_api.listsinceblock(blockhash)
         # print transactions
-        transactions = [tx for tx in transactions["transactions"] if tx["category"]=="receive"]
+        transactions = [tx for tx in transactions["transactions"] if tx["category"] == "receive"]
         print transactions
         for tx in transactions:
             ba = BitcoinAddress.objects.filter(address=tx[u'address'])
@@ -81,14 +68,12 @@ def query_transactions():
 
         cache.set("queried_block_index", max_query_block)
 
-import sys
-from cStringIO import StringIO
 
 @task()
 def check_integrity():
     from django_bitcoin.models import Wallet, BitcoinAddress, WalletTransaction, DepositTransaction
     from django_bitcoin.utils import bitcoind
-    from django.db.models import Avg, Max, Min, Sum
+    from django.db.models import Max, Sum
     from decimal import Decimal
 
     import sys
@@ -119,19 +104,20 @@ def check_integrity():
     print "Wallet quick check"
     total_sum = Decimal(0)
     for w in Wallet.objects.filter(last_balance__lt=0):
-        if w.total_balance()<0:
+        if w.total_balance() < 0:
             bal = w.total_balance()
             # print w.id, bal
             total_sum += bal
     print "Negatives:", Wallet.objects.filter(last_balance__lt=0).count(), "Amount:", total_sum
     print "Migration check"
-    tot_received = WalletTransaction.objects.filter(from_wallet=None).aggregate(Sum('amount'))['amount__sum'] or Decimal(0)
+    tot_received = WalletTransaction.objects.filter(from_wallet=None)
+    tot_received = tot_received.aggregate(Sum('amount'))['amount__sum'] or Decimal(0)
     tot_received_bitcoinaddress = BitcoinAddress.objects.filter(migrated_to_transactions=True)\
         .aggregate(Sum('least_received_confirmed'))['least_received_confirmed__sum'] or Decimal(0)
     tot_received_unmigrated = BitcoinAddress.objects.filter(migrated_to_transactions=False)\
         .aggregate(Sum('least_received_confirmed'))['least_received_confirmed__sum'] or Decimal(0)
     if tot_received != tot_received_bitcoinaddress:
-        print "wrong total receive amount! "+str(tot_received)+", "+str(tot_received_bitcoinaddress)
+        print "wrong total receive amount! " + str(tot_received) + ", " + str(tot_received_bitcoinaddress)
     print "Total " + str(tot_received) + " BTC deposits migrated, unmigrated " + str(tot_received_unmigrated) + " BTC"
     print "Migration check #2"
     dts = DepositTransaction.objects.filter(address__migrated_to_transactions=False).exclude(transaction=None)
@@ -164,15 +150,16 @@ def check_integrity():
     for ba in BitcoinAddress.objects.filter(migrated_to_transactions=True):
         dts = ba.deposittransaction_set.filter(address=ba, confirmations__gte=settings.BITCOIN_MINIMUM_CONFIRMATIONS)
         deposit_sum = dts.aggregate(Sum('amount'))['amount__sum'] or Decimal(0)
-        wt_sum = WalletTransaction.objects.filter(deposit_address=ba).aggregate(Sum('amount'))['amount__sum'] or Decimal(0)
+        wt_sum = WalletTransaction.objects.filter(deposit_address=ba)
+        wt_sum = wt_sum.aggregate(Sum('amount'))['amount__sum'] or Decimal(0)
         if wt_sum != deposit_sum or ba.least_received_confirmed != deposit_sum:
             print "Bitcoinaddress integrity error!", ba.address, deposit_sum, wt_sum, ba.least_received_confirmed
         # if random.random() < 0.001:
         #     sleep(1)
 
-    integrity_test_output = sys.stdout.getvalue() # release output
+    integrity_test_output = sys.stdout.getvalue()  # release output
     # ####
 
     sys.stdout.close()  # close the stream
-    sys.stdout = backup # restore original stdout
+    sys.stdout = backup  # restore original stdout
     mail_admins("Integrity check", integrity_test_output)
