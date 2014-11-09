@@ -102,62 +102,6 @@ class BitcoinAddress(models.Model):
     class Meta:
         verbose_name_plural = 'Bitcoin addresses'
 
-    def query_bitcoind(self, minconf=settings.BITCOIN_MINIMUM_CONFIRMATIONS, triggered_tx=None):
-        raise Exception("Deprecated")
-        with CacheLock('query_bitcoind'):
-            r = bitcoind.total_received(self.address, minconf=minconf)
-
-            if r > self.least_received_confirmed and \
-                    minconf >= settings.BITCOIN_MINIMUM_CONFIRMATIONS:
-                transaction_amount = r - self.least_received_confirmed
-                if settings.BITCOIN_TRANSACTION_SIGNALING:
-                    if self.wallet:
-                        balance_changed_confirmed.send(sender=self.wallet,
-                                                       changed=(transaction_amount), bitcoinaddress=self)
-
-                updated = BitcoinAddress.objects.select_for_update().filter(
-                    id=self.id,
-                    least_received_confirmed=self.least_received_confirmed).update(
-                    least_received_confirmed=r)
-
-                if self.least_received < r:
-                    BitcoinAddress.objects.select_for_update().filter(id=self.id,
-                                                                      least_received=self.least_received).update(least_received=r)
-
-                if self.wallet and updated:
-                    dps = DepositTransaction.objects.filter(address=self, transaction=None,
-                                                            amount__lte=transaction_amount, wallet=self.wallet).order_by("-amount", "-id")
-                    total_confirmed_amount = Decimal(0)
-                    confirmed_dps = []
-                    for dp in dps:
-                        if dp.amount <= transaction_amount - total_confirmed_amount:
-                            DepositTransaction.objects.filter(id=dp.id).update(confirmations=minconf)
-                            total_confirmed_amount += dp.amount
-                            confirmed_dps.append(dp.id)
-                    if total_confirmed_amount < transaction_amount:
-                        dp = DepositTransaction.objects.create(address=self, amount=transaction_amount - total_confirmed_amount, wallet=self.wallet,
-                                                               confirmations=minconf, txid=triggered_tx)
-                        confirmed_dps.append(dp.id)
-                    if self.migrated_to_transactions and updated:
-                        wt = WalletTransaction.objects.create(to_wallet=self.wallet, amount=transaction_amount, description=self.address,
-                                                              deposit_address=self, deposit_transaction=deposit_tx)
-                        DepositTransaction.objects.select_for_update().filter(address=self, wallet=self.wallet,
-                                                                              id__in=confirmed_dps, transaction=None).update(transaction=wt)
-                    update_wallet_balance.delay(self.wallet.id)
-
-            elif r > self.least_received:
-                transaction_amount = r - self.least_received
-                if settings.BITCOIN_TRANSACTION_SIGNALING:
-                    if self.wallet:
-                        balance_changed.send(sender=self.wallet, changed=(transaction_amount), bitcoinaddress=self)
-                # self.least_received = r
-                # self.save()
-                updated = BitcoinAddress.objects.select_for_update().filter(id=self.id, least_received=self.least_received).update(least_received=r)
-                if self.wallet and minconf == 0 and updated:
-                    DepositTransaction.objects.create(address=self, amount=transaction_amount, wallet=self.wallet,
-                                                      confirmations=0, txid=triggered_tx)
-            return r
-
     def query_bitcoin_deposit(self, deposit_tx):
         if deposit_tx.transaction:
             print "Already has a transaction!"
