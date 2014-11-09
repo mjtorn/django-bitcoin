@@ -5,8 +5,7 @@ from django_bitcoin.models import DepositTransaction, BitcoinAddress, WalletTran
 from django.db.models import Sum
 from decimal import Decimal
 
-from distributedlock import distributedlock, MemcachedLock, LockNotAcquiredError
-from django.core.cache import cache
+from django_bitcoin.locking import CacheLock
 
 from django.db import transaction
 
@@ -17,13 +16,6 @@ from django.contrib.auth.models import User
 @transaction.commit_manually
 def flush_transaction():
     transaction.commit()
-
-
-def CacheLock(key, lock=None, blocking=True, timeout=10):
-    if lock is None:
-        lock = MemcachedLock(key=key, client=cache, timeout=timeout)
-
-    return distributedlock(key, lock, blocking)
 
 
 class Command(BaseCommand):

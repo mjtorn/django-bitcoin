@@ -11,12 +11,12 @@ from django.utils import importlib, timezone
 
 from celery import task
 from decimal import Decimal
-from distributedlock import distributedlock, MemcachedLock, LockNotAcquiredError
 
 from . import settings
 
 from .fields.utils import is_valid_btc_address
 from .bitcoind import bitcoind
+from .locking import CacheLock, NonBlockingCacheLock
 
 from . import currency
 from . import jsonrpc
@@ -26,19 +26,6 @@ import django.dispatch
 
 import datetime
 
-
-def CacheLock(key, lock=None, blocking=True, timeout=10000):
-    if lock is None:
-        lock = MemcachedLock(key=key, client=cache, timeout=timeout)
-
-    return distributedlock(key, lock, blocking)
-
-
-def NonBlockingCacheLock(key, lock=None, blocking=False, timeout=10000):
-    if lock is None:
-        lock = MemcachedLock(key=key, client=cache, timeout=timeout)
-
-    return distributedlock(key, lock, blocking)
 
 # initialize the conversion module
 

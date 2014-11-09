@@ -1,22 +1,15 @@
 from __future__ import with_statement
 
-from django_bitcoin.bitcoind import bitcoind
-from django_bitcoin import settings
+from .bitcoind import bitcoind
+from .locking import NonBlockingCacheLock
+from . import settings
 
 from django_bitcoin.models import DepositTransaction, BitcoinAddress
 
 from celery import task
-from distributedlock import distributedlock, MemcachedLock, LockNotAcquiredError
 from django.core.cache import cache
 
 from django.core.mail import mail_admins
-
-
-def NonBlockingCacheLock(key, lock=None, blocking=False, timeout=10000):
-    if lock is None:
-        lock = MemcachedLock(key=key, client=cache, timeout=timeout)
-
-    return distributedlock(key, lock, blocking)
 
 
 @task()
