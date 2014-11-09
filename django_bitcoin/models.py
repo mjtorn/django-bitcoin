@@ -13,7 +13,7 @@ from django.contrib.sites.models import Site
 from django.contrib.auth.models import User
 
 from django_bitcoin.utils import *
-from django_bitcoin.utils import bitcoind
+from django_bitcoin.bitcoind import bitcoind
 from django_bitcoin import settings
 
 from django.utils.translation import ugettext_lazy as _
