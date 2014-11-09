@@ -3,7 +3,6 @@ from __future__ import with_statement
 import datetime
 import random
 import hashlib
-import base64
 import pytz
 from decimal import Decimal
 

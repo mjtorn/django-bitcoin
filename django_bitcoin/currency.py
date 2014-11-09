@@ -28,7 +28,6 @@ import urllib
 import urllib2
 import random
 import hashlib
-import base64
 from decimal import Decimal
 import decimal
 import warnings
