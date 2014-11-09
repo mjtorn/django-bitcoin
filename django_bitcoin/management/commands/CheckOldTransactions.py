@@ -1,8 +1,7 @@
 from django.core.management.base import NoArgsCommand
-from time import sleep, time
+from time import time
 from django_bitcoin.utils import bitcoind
 from django_bitcoin.models import BitcoinAddress
-from django.conf import settings
 from decimal import Decimal
 import datetime
 
@@ -37,8 +36,8 @@ class Command(NoArgsCommand):
                     return
                 for ba in db_addresses:
                     if ba.address in addresses.keys() and\
-                        ba.least_received < addresses[ba.address]:
+                            ba.least_received < addresses[ba.address]:
                         ba.query_bitcoind()
                         ba.query_bitcoind(0)
-                    last_id=min(ba.id, last_id)
+                    last_id = min(ba.id, last_id)
                 print "finished 1000 scan", time() - start_time, last_id

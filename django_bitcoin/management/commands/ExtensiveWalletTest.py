@@ -1,22 +1,11 @@
 from django.core.management.base import NoArgsCommand
-from django.conf import settings
-import os
-import sys
-import re
-import codecs
-import commands
-import urllib2
-import urllib
-import json
 import random
 from time import sleep
-import math
-import datetime
 from django_bitcoin import Wallet
 from django_bitcoin.utils import bitcoind
 from decimal import Decimal
 import warnings
-import twitter
+
 
 class Command(NoArgsCommand):
     help = 'Tweet with LocalBitcoins.com account.'
@@ -25,7 +14,7 @@ class Command(NoArgsCommand):
         final_wallets = []
         process_num = random.randint(0, 1000)
         with warnings.catch_warnings():
-            warnings.filterwarnings("ignore",category=RuntimeWarning)
+            warnings.filterwarnings("ignore", category=RuntimeWarning)
             for i in range(0, 3):
                 w = Wallet.objects.create()
                 # print "starting w.id", w.id
@@ -61,5 +50,3 @@ class Command(NoArgsCommand):
         print str(process_num) + " w1.last_balance " + str(w1.last_balance)
         print str(process_num) + " w2.last_balance " + str(w2.last_balance)
         print str(process_num) + " w3.last_balance " + str(w3.last_balance)
-
-
