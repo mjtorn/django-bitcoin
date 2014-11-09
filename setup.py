@@ -1,3 +1,5 @@
+# vim: fileencoding=utf-8
+
 from setuptools import setup
 
 
@@ -15,15 +17,14 @@ packages = ['django_bitcoin',
             'django_bitcoin.migrations',
             'django_bitcoin.jsonrpc']
 
-long_description = open("README.rst").read() + "\n" + open("CHANGES.rst").read()
+long_description = open("README.md").read()
 
 setup(name='django-bitcoin',
-      version='0.2',
+      version='0.3.0',
       description='Bitcoin application integration for Django web framework',
       long_description=long_description,
-      author='Jeremias Kangas',
-      url='https://github.com/kangasbros/django-bitcoin',
-      requires=["qrcode (>2.3.1)", "South (>0.7.4)"],
+      author=u'Jeremias Kangas and Markus Törnqvist',
+      url='https://github.com/mjtorn/django-bitcoin',
       license="MIT",
       packages=packages,
       package_data=dict((package_name, template_patterns) for package_name in packages),

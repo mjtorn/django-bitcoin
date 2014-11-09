@@ -89,13 +89,6 @@ class DepositTransaction(models.Model):
     def __unicode__(self):
         return self.address.address + u", " + unicode(self.amount)
 
-# class BitcoinBlock(models.Model):
-#     created_at = models.DateTimeField(auto_now_add=True)
-#     blockhash = models.CharField(max_length=100)
-#     blockheight = models.IntegerField()
-#     confirmations = models.IntegerField(default=0)
-#     parent = models.ForeignKey('BitcoinBlock')
-
 class OutgoingTransaction(models.Model):
 
     created_at = models.DateTimeField(auto_now_add=True)
@@ -122,58 +115,6 @@ def update_wallet_balance(wallet_id):
     Wallet.objects.filter(id=wallet_id).update(last_balance=w.total_balance_sql())
 
 from time import sleep
-
-# @task()
-# @db_transaction.commit_manually
-# def process_outgoing_transactions():
-#     if cache.get("process_outgoing_transactions"):
-#         print "process ongoing, skipping..."
-#         db_transaction.rollback()
-#         return
-#     if cache.get("wallet_downtime_utc"):
-#         db_transaction.rollback()
-#         return
-#     # try out bitcoind connection
-#     print bitcoind.bitcoind_api.getinfo()
-#     with NonBlockingCacheLock('process_outgoing_transactions'):
-#         update_wallets = []
-#         for ot in OutgoingTransaction.objects.filter(executed_at=None)[:3]:
-#             result = None
-#             updated = OutgoingTransaction.objects.filter(id=ot.id,
-#                 executed_at=None, txid=None, under_execution=False).select_for_update().update(executed_at=timezone.now(), txid=result)
-#             db_transaction.commit()
-#             if updated:
-#                 try:
-#                     result = bitcoind.send(ot.to_bitcoinaddress, ot.amount)
-#                     updated2 = OutgoingTransaction.objects.filter(id=ot.id, txid=None).select_for_update().update(txid=result)
-#                     db_transaction.commit()
-#                     if updated2:
-#                         transaction = bitcoind.gettransaction(result)
-#                         if Decimal(transaction['fee']) < Decimal(0):
-#                             wt = ot.wallettransaction_set.all()[0]
-#                             fee_transaction = WalletTransaction.objects.create(
-#                                 amount=Decimal(transaction['fee']) * Decimal(-1),
-#                                 from_wallet_id=wt.from_wallet_id)
-#                             update_wallets.append(wt.from_wallet_id)
-#                 except jsonrpc.JSONRPCException as e:
-#                     if e.error == u"{u'message': u'Insufficient funds', u'code': -4}":
-#                         OutgoingTransaction.objects.filter(id=ot.id, txid=None,
-#                             under_execution=False).select_for_update().update(executed_at=None)
-#                         db_transaction.commit()
-#                         # sleep(10)
-#                         raise
-#                     else:
-#                         OutgoingTransaction.objects.filter(id=ot.id).select_for_update().update(under_execution=True)
-#                         db_transaction.commit()
-#                         raise
-
-#             else:
-#                 raise Exception("Outgoingtransaction can't be updated!")
-#         db_transaction.commit()
-#         for wid in update_wallets:
-#             update_wallet_balance.delay(wid)
-
-# TODO: Group outgoing transactions to save on tx fees
 
 def fee_wallet():
     master_wallet_id = cache.get("django_bitcoin_fee_wallet_id")
@@ -951,47 +892,6 @@ class Wallet(models.Model):
             cursor.execute("DELETE FROM django_bitcoin_wallettransaction WHERE to_wallet_id=from_wallet_id")
             transaction.commit_unless_managed()
 
-    # def save(self, **kwargs):
-    #     self.updated_at = timezone.now()
-    #     super(Wallet, self).save(**kwargs)
-
-### Maybe in the future
-
-# class FiatWalletTransaction(models.Model):
-#     """Transaction for storing fiat currencies"""
-#     pass
-
-# class FiatWallet(models.Model):
-#     """Wallet for storing fiat currencies"""
-#     pass
-
-# class BitcoinEscrow(models.Model):
-#     """Bitcoin escrow payment"""
-
-#     created_at = models.DateTimeField(auto_now_add=True)
-#     updated_at = models.DateTimeField(auto_now=True)
-
-#     seller = models.ForeignKey(User)
-
-#     bitcoin_payment = models.ForeignKey(Payment)
-
-#     confirm_hash = models.CharField(max_length=50, blank=True)
-
-#     buyer_address = models.TextField()
-#     buyer_phone = models.CharField(max_length=20, blank=True)
-#     buyer_email = models.EmailField(max_length=75)
-
-#     def save(self, **kwargs):
-#         super(BitcoinEscrow, self).save(**kwargs)
-#         if not self.confirm_hash:
-#             self.confirm_hash=generateuniquehash(
-#                 length=32,
-#                 extradata=str(self.id))
-#             super(BitcoinEscrow, self).save(**kwargs)
-
-#     @models.permalink
-#     def get_absolute_url(self):
-#         return ('view_or_url_name',)
 
 
 def refill_payment_queue():
