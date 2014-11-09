@@ -1,14 +1,12 @@
-from django.core.management import setup_environ
-import settings
-setup_environ(settings)
-
 # Tests only with internal transf
 from decimal import Decimal
-import unittest
-from django_bitcoin import Wallet
+from django.test import TestCase
+from django_bitcoin.models import Wallet
+from unittest import skip
 
 
-class InternalChangesTest(unittest.TestCase):
+@skip
+class InternalChangesTest(TestCase):
     def setUp(self):
         self.origin = Wallet.objects.all()[0]
 
@@ -106,5 +104,3 @@ class InternalChangesTest(unittest.TestCase):
         self.w6.delete()
         self.w7.delete()
 
-if __name__ == '__main__':
-    unittest.main()
