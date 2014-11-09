@@ -1,32 +1,31 @@
 from __future__ import with_statement
 
-import datetime
-import random
-import hashlib
-import pytz
-from decimal import Decimal
-
-from django.db import models
-from django.utils import timezone
-from django.contrib.sites.models import Site
-from django.contrib.auth.models import User
-
-from django_bitcoin.utils import *
-from django_bitcoin.bitcoind import bitcoind
-from django_bitcoin import settings
-
+from django.core.cache import cache
+from django.db.models import Q
 from django.utils.translation import ugettext_lazy as _
+
+from django.core import urlresolvers
+from django.db import transaction as db_transaction
+from django.db import models
+from django.utils import importlib, timezone
+
+from celery import task
+from decimal import Decimal
+from distributedlock import distributedlock, MemcachedLock, LockNotAcquiredError
+
+from . import settings
+
+from .fields.utils import is_valid_btc_address
+from .bitcoind import bitcoind
+
+from . import currency
+from . import jsonrpc
+from . import utils
 
 import django.dispatch
 
-import jsonrpc
+import datetime
 
-from .fields.utils import is_valid_btc_address
-
-from django.db import transaction as db_transaction
-from celery import task
-from distributedlock import distributedlock, MemcachedLock, LockNotAcquiredError
-from django.db.models import Avg, Max, Min, Sum
 
 def CacheLock(key, lock=None, blocking=True, timeout=10000):
     if lock is None:
@@ -34,21 +33,23 @@ def CacheLock(key, lock=None, blocking=True, timeout=10000):
 
     return distributedlock(key, lock, blocking)
 
+
 def NonBlockingCacheLock(key, lock=None, blocking=False, timeout=10000):
     if lock is None:
         lock = MemcachedLock(key=key, client=cache, timeout=timeout)
 
     return distributedlock(key, lock, blocking)
 
+# initialize the conversion module
+
+for dottedpath in settings.BITCOIN_CURRENCIES:
+    mod, func = urlresolvers.get_mod_func(dottedpath)
+    klass = getattr(importlib.import_module(mod), func)
+    currency.exchange.register_currency(klass())
+
 balance_changed = django.dispatch.Signal(providing_args=["changed", "transaction", "bitcoinaddress"])
 balance_changed_confirmed = django.dispatch.Signal(providing_args=["changed", "transaction", "bitcoinaddress"])
 
-
-currencies = (
-    (1, "USD"),
-    (2, "EUR"),
-    (3, "BTC")
-)
 
 # XXX There *is* a risk when dealing with less then 6 confirmations. Check:
 # http://eprint.iacr.org/2012/248.pdf
@@ -59,6 +60,7 @@ confirmation_choices = (
     (1, "1, (safer, slower for the buyer)"),
     (5, "5, (for the paranoid, not recommended)")
 )
+
 
 class Transaction(models.Model):
     created_at = models.DateTimeField(auto_now_add=True)
@@ -79,7 +81,7 @@ class DepositTransaction(models.Model):
 
     wallet = models.ForeignKey("Wallet")
 
-    under_execution = models.BooleanField(default=False) # execution fail
+    under_execution = models.BooleanField(default=False)  # execution fail
     transaction = models.ForeignKey('WalletTransaction', null=True, default=None)
 
     confirmations = models.IntegerField(default=0)
@@ -88,12 +90,13 @@ class DepositTransaction(models.Model):
     def __unicode__(self):
         return self.address.address + u", " + unicode(self.amount)
 
+
 class OutgoingTransaction(models.Model):
 
     created_at = models.DateTimeField(auto_now_add=True)
     expires_at = models.DateTimeField(auto_now_add=True)
-    executed_at = models.DateTimeField(null=True,default=None)
-    under_execution = models.BooleanField(default=False) # execution fail
+    executed_at = models.DateTimeField(null=True, default=None)
+    under_execution = models.BooleanField(default=False)  # execution fail
     to_bitcoinaddress = models.CharField(
         max_length=50,
         blank=True)
@@ -108,12 +111,12 @@ class OutgoingTransaction(models.Model):
     def __unicode__(self):
         return unicode(self.created_at) + ": " + self.to_bitcoinaddress + u", " + unicode(self.amount)
 
+
 @task()
 def update_wallet_balance(wallet_id):
     w = Wallet.objects.get(id=wallet_id)
     Wallet.objects.filter(id=wallet_id).update(last_balance=w.total_balance_sql())
 
-from time import sleep
 
 def fee_wallet():
     master_wallet_id = cache.get("django_bitcoin_fee_wallet_id")
@@ -126,6 +129,7 @@ def fee_wallet():
         mw.save()
     cache.set("django_bitcoin_fee_wallet_id", mw.id)
     return mw
+
 
 def filter_doubles(outgoing_list):
     ot_ids = []
@@ -140,8 +144,8 @@ def filter_doubles(outgoing_list):
 @task()
 @db_transaction.autocommit
 def process_outgoing_transactions():
-    if OutgoingTransaction.objects.filter(executed_at=None, expires_at__lte=timezone.now()).count()>0 or \
-        OutgoingTransaction.objects.filter(executed_at=None).count()>6:
+    if OutgoingTransaction.objects.filter(executed_at=None, expires_at__lte=timezone.now()).count() > 0 or \
+            OutgoingTransaction.objects.filter(executed_at=None).count() > 6:
         blockcount = bitcoind.bitcoind_api.getblockcount()
         with NonBlockingCacheLock('process_outgoing_transactions'):
             ots_ids = filter_doubles(OutgoingTransaction.objects.filter(executed_at=None).order_by("expires_at")[:15])
@@ -151,18 +155,18 @@ def process_outgoing_transactions():
             for ot in ots:
                 transaction_hash[ot.to_bitcoinaddress] = float(ot.amount)
             updated = OutgoingTransaction.objects.filter(id__in=ots_ids,
-                executed_at=None).select_for_update().update(executed_at=timezone.now())
+                                                         executed_at=None).select_for_update().update(executed_at=timezone.now())
             if updated == len(ots):
                 try:
                     result = bitcoind.sendmany(transaction_hash)
                 except jsonrpc.JSONRPCException as e:
                     if e.error == u"{u'message': u'Insufficient funds', u'code': -4}" or \
-                        e.error == u"{u'message': u'Insufficient funds', u'code': -6}":
+                            e.error == u"{u'message': u'Insufficient funds', u'code': -6}":
                         u2 = OutgoingTransaction.objects.filter(id__in=ots_ids, under_execution=False
-                            ).select_for_update().update(executed_at=None)
+                                                                ).select_for_update().update(executed_at=None)
                     else:
                         u2 = OutgoingTransaction.objects.filter(id__in=ots_ids, under_execution=False
-                            ).select_for_update().update(under_execution=True, txid=e.error)
+                                                                ).select_for_update().update(under_execution=True, txid=e.error)
                     raise
                 OutgoingTransaction.objects.filter(id__in=ots_ids).update(txid=result)
                 transaction = bitcoind.gettransaction(result)
@@ -170,9 +174,9 @@ def process_outgoing_transactions():
                     fw = fee_wallet()
                     fee_amount = Decimal(transaction['fee']) * Decimal(-1)
                     orig_fee_transaction = WalletTransaction.objects.create(
-                            amount=fee_amount,
-                            from_wallet=fw,
-                            to_wallet=None)
+                        amount=fee_amount,
+                        from_wallet=fw,
+                        to_wallet=None)
                     i = 1
                     for ot_id in ots_ids:
                         wt = WalletTransaction.objects.get(outgoing_transaction__id=ot_id)
@@ -215,22 +219,25 @@ class BitcoinAddress(models.Model):
             r = bitcoind.total_received(self.address, minconf=minconf)
 
             if r > self.least_received_confirmed and \
-                minconf >= settings.BITCOIN_MINIMUM_CONFIRMATIONS:
+                    minconf >= settings.BITCOIN_MINIMUM_CONFIRMATIONS:
                 transaction_amount = r - self.least_received_confirmed
                 if settings.BITCOIN_TRANSACTION_SIGNALING:
                     if self.wallet:
                         balance_changed_confirmed.send(sender=self.wallet,
-                            changed=(transaction_amount), bitcoinaddress=self)
+                                                       changed=(transaction_amount), bitcoinaddress=self)
 
-                updated = BitcoinAddress.objects.select_for_update().filter(id=self.id, least_received_confirmed=self.least_received_confirmed).update(least_received_confirmed=r)
+                updated = BitcoinAddress.objects.select_for_update().filter(
+                    id=self.id,
+                    least_received_confirmed=self.least_received_confirmed).update(
+                    least_received_confirmed=r)
 
                 if self.least_received < r:
                     BitcoinAddress.objects.select_for_update().filter(id=self.id,
-                        least_received=self.least_received).update(least_received=r)
+                                                                      least_received=self.least_received).update(least_received=r)
 
                 if self.wallet and updated:
                     dps = DepositTransaction.objects.filter(address=self, transaction=None,
-                        amount__lte=transaction_amount, wallet=self.wallet).order_by("-amount", "-id")
+                                                            amount__lte=transaction_amount, wallet=self.wallet).order_by("-amount", "-id")
                     total_confirmed_amount = Decimal(0)
                     confirmed_dps = []
                     for dp in dps:
@@ -240,13 +247,13 @@ class BitcoinAddress(models.Model):
                             confirmed_dps.append(dp.id)
                     if total_confirmed_amount < transaction_amount:
                         dp = DepositTransaction.objects.create(address=self, amount=transaction_amount - total_confirmed_amount, wallet=self.wallet,
-                            confirmations=minconf, txid=triggered_tx)
+                                                               confirmations=minconf, txid=triggered_tx)
                         confirmed_dps.append(dp.id)
                     if self.migrated_to_transactions and updated:
                         wt = WalletTransaction.objects.create(to_wallet=self.wallet, amount=transaction_amount, description=self.address,
-                            deposit_address=self, deposit_transaction=deposit_tx)
+                                                              deposit_address=self, deposit_transaction=deposit_tx)
                         DepositTransaction.objects.select_for_update().filter(address=self, wallet=self.wallet,
-                            id__in=confirmed_dps, transaction=None).update(transaction=wt)
+                                                                              id__in=confirmed_dps, transaction=None).update(transaction=wt)
                     update_wallet_balance.delay(self.wallet.id)
 
             elif r > self.least_received:
@@ -257,9 +264,9 @@ class BitcoinAddress(models.Model):
                 # self.least_received = r
                 # self.save()
                 updated = BitcoinAddress.objects.select_for_update().filter(id=self.id, least_received=self.least_received).update(least_received=r)
-                if self.wallet and minconf==0 and updated:
+                if self.wallet and minconf == 0 and updated:
                     DepositTransaction.objects.create(address=self, amount=transaction_amount, wallet=self.wallet,
-                        confirmations=0, txid=triggered_tx)
+                                                      confirmations=0, txid=triggered_tx)
             return r
 
     def query_bitcoin_deposit(self, deposit_tx):
@@ -274,10 +281,10 @@ class BitcoinAddress(models.Model):
                 if settings.BITCOIN_TRANSACTION_SIGNALING:
                     if self.wallet:
                         balance_changed_confirmed.send(sender=self.wallet,
-                            changed=(deposit_tx.amount), bitcoinaddress=self)
+                                                       changed=(deposit_tx.amount), bitcoinaddress=self)
 
                 updated = BitcoinAddress.objects.select_for_update().filter(id=self.id,
-                    least_received_confirmed=self.least_received_confirmed).update(
+                                                                            least_received_confirmed=self.least_received_confirmed).update(
                     least_received_confirmed=self.least_received_confirmed + deposit_tx.amount)
 
                 if self.wallet and updated:
@@ -289,7 +296,7 @@ class BitcoinAddress(models.Model):
                             least_received=self.least_received_confirmed)
                     if self.migrated_to_transactions:
                         wt = WalletTransaction.objects.create(to_wallet=self.wallet, amount=deposit_tx.amount, description=self.address,
-                            deposit_address=self)
+                                                              deposit_address=self)
                         deposit_tx.transaction = wt
                         DepositTransaction.objects.select_for_update().filter(id=deposit_tx.id).update(transaction=wt)
                     self.wallet.update_last_balance(deposit_tx.amount)
@@ -325,21 +332,20 @@ class BitcoinAddress(models.Model):
         return self.address
 
 
-
 def new_bitcoin_address():
     while True:
         db_transaction.enter_transaction_management()
         db_transaction.commit()
-        bp = BitcoinAddress.objects.filter(Q(active=False) & Q(wallet__isnull=True) & \
-                Q(least_received__lte=0))
+        bp = BitcoinAddress.objects.filter(Q(active=False) & Q(wallet__isnull=True) &
+                                           Q(least_received__lte=0))
         if len(bp) < 1:
             refill_payment_queue()
             db_transaction.commit()
             print "refilling queue...", bp
         else:
             bp = bp[0]
-            updated = BitcoinAddress.objects.select_for_update().filter(Q(id=bp.id) & Q(active=False) & Q(wallet__isnull=True) & \
-                Q(least_received__lte=0)).update(active=True)
+            updated = BitcoinAddress.objects.select_for_update().filter(Q(id=bp.id) & Q(active=False) & Q(wallet__isnull=True) &
+                                                                        Q(least_received__lte=0)).update(active=True)
             db_transaction.commit()
             if updated:
                 print 'returning bp', bp
@@ -377,8 +383,8 @@ class Payment(models.Model):
     transactions = models.ManyToManyField(Transaction)
 
     def calculate_amount(self, proportion):
-        return quantitize_bitcoin(
-            Decimal((proportion/Decimal("100.0"))*self.amount))
+        return utils.quantitize_bitcoin(
+            Decimal((proportion / Decimal("100.0")) * self.amount))
 
     def add_transaction(self, amount, address):
         self.withdrawn_total += amount
@@ -390,12 +396,12 @@ class Payment(models.Model):
         return bctrans
 
     def withdraw_proportion(self, address, proportion):
-        if proportion<=Decimal("0") or proportion>Decimal("100"):
+        if proportion <= Decimal("0") or proportion > Decimal("100"):
             raise Exception("Illegal proportion.")
 
         amount = self.calculate_amount(proportion)
 
-        if self.amount-self.withdrawn_total > amount:
+        if self.amount - self.withdrawn_total > amount:
             raise Exception("Trying to withdraw too much.")
 
         self.add_transaction(amount, address)
@@ -404,58 +410,58 @@ class Payment(models.Model):
     @classmethod
     def withdraw_proportion_all(cls, address, bitcoin_payments_proportions):
         """hash BitcoinPayment -> Proportion"""
-        final_amount=Decimal("0.0")
+        final_amount = Decimal("0.0")
         print bitcoin_payments_proportions
         for bp, proportion in bitcoin_payments_proportions.iteritems():
-            am=bp.calculate_amount(proportion)
-            final_amount+=am
+            am = bp.calculate_amount(proportion)
+            final_amount += am
             bp.add_transaction(am, address)
         bitcoind.send(address, final_amount)
         return True
 
     def withdraw_amounts(self, addresses_shares):
         """hash address -> percentage (string -> Decimal)"""
-        if self.amount_paid<self.amount:
+        if self.amount_paid < self.amount:
             raise Exception("Not paid.")
         if self.withdrawn_at:
             raise Exception("Trying to withdraw again.")
-        if sum(addresses_shares.values())>100:
+        if sum(addresses_shares.values()) > 100:
             raise Exception("Sum of proportions must be <=100.")
-        #self.withdraw_addresses=",".join(addresses)
+        # self.withdraw_addresses=",".join(addresses)
         #self.withdraw_proportions=",".join([str(x) for x in proportions])
-        amounts=[]
+        amounts = []
         for p in addresses_shares.values():
-            if p<=0:
+            if p <= 0:
                 raise Exception()
-            am=quantitize_bitcoin(Decimal((p/Decimal("100.0"))*self.amount))
+            am = utils.quantitize_bitcoin(Decimal((p / Decimal("100.0")) * self.amount))
             amounts.append(am)
-        #self.withdraw_proportions=",".join([str(x) for x in ])
-        if sum(amounts)>self.amount:
+        # self.withdraw_proportions=",".join([str(x) for x in ])
+        if sum(amounts) > self.amount:
             raise Exception("Sum of calculated amounts exceeds funds.")
         return amounts
 
     @classmethod
     def calculate_amounts(cls, bitcoinpayments, addresses_shares):
-        amounts_all=[Decimal("0.0") for _i in addresses_shares]
+        amounts_all = [Decimal("0.0") for _i in addresses_shares]
         for amount, payment in zip(amounts_all, bitcoinpayments):
-            withdrawn=payment.withdraw_amounts(addresses_shares)
-            amounts_all=[(w+total) for w, total in zip(withdrawn, amounts_all)]
+            withdrawn = payment.withdraw_amounts(addresses_shares)
+            amounts_all = [(w + total) for w, total in zip(withdrawn, amounts_all)]
         return amounts_all
 
     @classmethod
     def withdraw_all(cls, bitcoinpayments, addresses_shares):
-        #if len(bitcoinpayments)!=len(addresses_shares):
+        # if len(bitcoinpayments)!=len(addresses_shares):
         #    raise Exception("")
-        amounts_all=Payment.calculate_amounts(bitcoinpayments, addresses_shares)
+        amounts_all = Payment.calculate_amounts(bitcoinpayments, addresses_shares)
         for bp in bitcoinpayments:
-            am=bp.withdraw_amounts(addresses_shares)
-            bp.withdraw_addresses=",".join(addresses_shares.keys())
-            bp.withdraw_proportions=",".join(
+            am = bp.withdraw_amounts(addresses_shares)
+            bp.withdraw_addresses = ",".join(addresses_shares.keys())
+            bp.withdraw_proportions = ",".join(
                 [str(x) for x in addresses_shares.values()])
-            bp.withdraw_amounts=",".join(
+            bp.withdraw_amounts = ",".join(
                 [str(x) for x in am])
-            bp.withdrawn_at=timezone.now()
-            bp.withdrawn_total=sum(am)
+            bp.withdrawn_at = timezone.now()
+            bp.withdrawn_total = sum(am)
             bp.save()
         for i, share in enumerate(addresses_shares.keys()):
             bitcoind.send(share, amounts_all[i])
@@ -465,27 +471,27 @@ class Payment(models.Model):
         if self.paid_at:
             return True
         self.update_payment(minconf=minconf)
-        return self.amount_paid>=self.amount
+        return self.amount_paid >= self.amount
 
     def getbalance(self, minconf=1):
         return bitcoind.total_received(self.address, minconf=minconf)
 
     def update_payment(self, minconf=1):
-        new_amount=Decimal(bitcoind.total_received(self.address, minconf=minconf))
+        new_amount = Decimal(bitcoind.total_received(self.address, minconf=minconf))
         print "blaa", new_amount, self.address
-        if new_amount>=self.amount:
-            self.amount_paid=new_amount
-            self.paid_at=timezone.now()
+        if new_amount >= self.amount:
+            self.amount_paid = new_amount
+            self.paid_at = timezone.now()
             self.save()
-        #elif (timezone.now()-self.updated_at)>datetime.timedelta(hours=PAYMENT_VALID_HOURS):
+        # elif (timezone.now()-self.updated_at)>datetime.timedelta(hours=PAYMENT_VALID_HOURS):
         #    self.deactivate()
 
     def deactivate(self):
         return False
         if self.amount_paid > Decimal("0"):
             return False
-        self.active=False
-        self.description=""
+        self.active = False
+        self.description = ""
         self.save()
         return True
 
@@ -499,6 +505,7 @@ class Payment(models.Model):
     @models.permalink
     def get_absolute_url(self):
         return ('view_or_url_name',)
+
 
 class WalletTransaction(models.Model):
     created_at = models.DateTimeField(auto_now_add=True)
@@ -526,12 +533,12 @@ class WalletTransaction(models.Model):
 
     def __unicode__(self):
         if self.from_wallet and self.to_wallet:
-            return u"Wallet transaction "+unicode(self.amount)
+            return u"Wallet transaction " + unicode(self.amount)
         elif self.from_wallet and self.to_bitcoinaddress:
-            return u"Outgoing bitcoin transaction "+unicode(self.amount)
+            return u"Outgoing bitcoin transaction " + unicode(self.amount)
         elif self.to_wallet and not self.from_wallet:
-            return u"Deposit "+unicode(self.amount)
-        return u"Fee "+unicode(self.amount)
+            return u"Deposit " + unicode(self.amount)
+        return u"Fee " + unicode(self.amount)
 
     def clean(self):
         from django.core.exceptions import ValidationError
@@ -549,22 +556,23 @@ class WalletTransaction(models.Model):
         The sum of the two amounts is the total transaction amount.
         """
 
-        if not transactions: transactions = {}
+        if not transactions:
+            transactions = {}
 
         if minconf == 0 or self.to_bitcoinaddress:
             return (0, self.amount, transactions)
 
         _, confirmed, txs = self.from_wallet.balance(minconf=minconf,
-                                             timeframe=self.created_at,
-                                             transactions=transactions)
+                                                     timeframe=self.created_at,
+                                                     transactions=transactions)
         transactions.update(txs)
 
-        if confirmed > self.amount: confirmed = self.amount
+        if confirmed > self.amount:
+            confirmed = self.amount
         unconfirmed = self.amount - confirmed
 
         return (unconfirmed, confirmed, transactions)
 
-from django.db.models import Q
 
 class Wallet(models.Model):
     created_at = models.DateTimeField(auto_now_add=True)
@@ -586,7 +594,7 @@ class Wallet(models.Model):
     # tries to update instantly, if not succesful updates using sql query (celery task)
     def update_last_balance(self, amount):
         if self.__class__.objects.filter(id=self.id, last_balance=self.last_balance
-            ).update(last_balance=(self.last_balance + amount)) < 1:
+                                         ).update(last_balance=(self.last_balance + amount)) < 1:
             update_wallet_balance.apply_async((self.id,), countdown=1)
 
     def __unicode__(self):
@@ -602,7 +610,7 @@ class Wallet(models.Model):
                 return usable_addresses[0].address
             addr = new_bitcoin_address()
             updated = BitcoinAddress.objects.select_for_update().filter(Q(id=addr.id) & Q(active=True) & Q(least_received__lte=0) & Q(wallet__isnull=True))\
-                          .update(active=True, wallet=self)
+                .update(active=True, wallet=self)
             print "addr_id", addr.id, updated
             db_transaction.commit()
             if updated:
@@ -616,7 +624,7 @@ class Wallet(models.Model):
 
     def send_to_wallet(self, otherWallet, amount, description=''):
 
-        if type(amount) != Decimal:
+        if not isinstance(amount, Decimal):
             amount = Decimal(amount)
         amount = amount.quantize(Decimal('0.00000001'))
 
@@ -640,8 +648,8 @@ class Wallet(models.Model):
             # concurrency check
             new_balance = avail - amount
             updated = Wallet.objects.filter(Q(id=self.id) & Q(transaction_counter=self.transaction_counter) &
-                Q(last_balance=avail))\
-              .update(last_balance=new_balance, transaction_counter=self.transaction_counter+1)
+                                            Q(last_balance=avail))\
+                .update(last_balance=new_balance, transaction_counter=self.transaction_counter + 1)
             if not updated:
                 print "wallet transaction concurrency:", new_balance, avail, self.transaction_counter, self.last_balance, self.total_balance()
                 raise Exception(_("Concurrency error with transactions. Please try again."))
@@ -653,7 +661,7 @@ class Wallet(models.Model):
                 to_wallet=otherWallet,
                 description=description)
             # db_transaction.commit()
-            self.transaction_counter = self.transaction_counter+1
+            self.transaction_counter = self.transaction_counter + 1
             self.last_balance = new_balance
             # updated = Wallet.objects.filter(Q(id=otherWallet.id))\
             #   .update(last_balance=otherWallet.total_balance_sql())
@@ -661,13 +669,13 @@ class Wallet(models.Model):
 
             if settings.BITCOIN_TRANSACTION_SIGNALING:
                 balance_changed.send(sender=self,
-                    changed=(Decimal(-1) * amount), transaction=transaction)
+                                     changed=(Decimal(-1) * amount), transaction=transaction)
                 balance_changed.send(sender=otherWallet,
-                    changed=(amount), transaction=transaction)
+                                     changed=(amount), transaction=transaction)
                 balance_changed_confirmed.send(sender=self,
-                    changed=(Decimal(-1) * amount), transaction=transaction)
+                                               changed=(Decimal(-1) * amount), transaction=transaction)
                 balance_changed_confirmed.send(sender=otherWallet,
-                    changed=(amount), transaction=transaction)
+                                               changed=(amount), transaction=transaction)
             return transaction
 
     def send_to_address(self, address, amount, description='', expires_seconds=settings.BITCOIN_OUTGOING_DEFAULT_DELAY_SECONDS):
@@ -675,7 +683,7 @@ class Wallet(models.Model):
             raise Exception("Outgoing transactions disabled! contact support.")
         address = address.strip()
 
-        if type(amount) != Decimal:
+        if not isinstance(amount, Decimal):
             amount = Decimal(amount)
         amount = amount.quantize(Decimal('0.00000001'))
 
@@ -693,28 +701,28 @@ class Wallet(models.Model):
                 raise Exception(_("Trying to send too much"))
             new_balance = avail - amount
             updated = Wallet.objects.filter(Q(id=self.id) & Q(transaction_counter=self.transaction_counter) &
-                Q(last_balance=avail) )\
-              .update(last_balance=new_balance, transaction_counter=self.transaction_counter+1)
+                                            Q(last_balance=avail))\
+                .update(last_balance=new_balance, transaction_counter=self.transaction_counter + 1)
             if not updated:
                 print "address transaction concurrency:", new_balance, avail, self.transaction_counter, self.last_balance, self.total_balance()
                 raise Exception(_("Concurrency error with transactions. Please try again."))
             # concurrency check end
             outgoing_transaction = OutgoingTransaction.objects.create(amount=amount, to_bitcoinaddress=address,
-                expires_at=timezone.now()+datetime.timedelta(seconds=expires_seconds))
+                                                                      expires_at=timezone.now() + datetime.timedelta(seconds=expires_seconds))
             bwt = WalletTransaction.objects.create(
                 amount=amount,
                 from_wallet=self,
                 to_bitcoinaddress=address,
                 outgoing_transaction=outgoing_transaction,
                 description=description)
-            process_outgoing_transactions.apply_async((), countdown=(expires_seconds+1))
+            process_outgoing_transactions.apply_async((), countdown=(expires_seconds + 1))
             # try:
             #     result = bitcoind.send(address, amount)
             # except jsonrpc.JSONRPCException:
             #     bwt.delete()
             #     updated2 = Wallet.objects.filter(Q(id=self.id) & Q(last_balance=new_balance)).update(last_balance=avail)
             #     raise
-            self.transaction_counter = self.transaction_counter+1
+            self.transaction_counter = self.transaction_counter + 1
             self.last_balance = new_balance
 
             # check if a transaction fee exists, and deduct it from the wallet
@@ -732,9 +740,9 @@ class Wallet(models.Model):
             #         .update(last_balance=new_balance-fee_transaction.amount)
             if settings.BITCOIN_TRANSACTION_SIGNALING:
                 balance_changed.send(sender=self,
-                    changed=(Decimal(-1) * amount), transaction=bwt)
+                                     changed=(Decimal(-1) * amount), transaction=bwt)
                 balance_changed_confirmed.send(sender=self,
-                    changed=(Decimal(-1) * amount), transaction=bwt)
+                                               changed=(Decimal(-1) * amount), transaction=bwt)
             return (bwt, None)
 
     def update_transaction_cache(self,
@@ -743,7 +751,8 @@ class Wallet(models.Model):
         Finds the timestamp from the oldest transaction found with wasn't yet
         confirmed. If none, returns the current timestamp.
         """
-        if mincf == 0: return timezone.now()
+        if mincf == 0:
+            return timezone.now()
 
         transactions_checked = "bitcoin_transactions_checked_%d" % mincf
         oldest_unconfirmed = "bitcoin_oldest_unconfirmed_%d" % mincf
@@ -751,7 +760,7 @@ class Wallet(models.Model):
         if cache.get(transactions_checked):
             return cache.get(oldest_unconfirmed)
         else:
-            cache.set(transactions_checked, True, 60*15)
+            cache.set(transactions_checked, True, 60 * 15)
             current_timestamp = timezone.now()
             transactions = WalletTransaction.objects.all()
             oldest = cache.get(oldest_unconfirmed)
@@ -760,7 +769,7 @@ class Wallet(models.Model):
 
             transactions_cache = {}
             for t in transactions.order_by('created_at'):
-                unc, _, txs =  t.confirmation_status(minconf=mincf, transactions=transactions_cache)
+                unc, _, txs = t.confirmation_status(minconf=mincf, transactions=transactions_cache)
                 transactions_cache.update(txs)
                 if unc:
                     cache.set(oldest_unconfirmed, t.created_at)
@@ -783,8 +792,8 @@ class Wallet(models.Model):
     def total_balance_sql(self, confirmed=True):
         from django.db import connection
         cursor = connection.cursor()
-        if confirmed == False:
-            sql="""
+        if confirmed is False:
+            sql = """
              SELECT IFNULL((SELECT SUM(least_received) FROM django_bitcoin_bitcoinaddress ba WHERE ba.wallet_id=%(id)s), 0)
             + IFNULL((SELECT SUM(amount) FROM django_bitcoin_wallettransaction wt WHERE wt.to_wallet_id=%(id)s AND wt.from_wallet_id>0), 0)
             - IFNULL((SELECT SUM(amount) FROM django_bitcoin_wallettransaction wt WHERE wt.from_wallet_id=%(id)s), 0) as total_balance;
@@ -792,7 +801,7 @@ class Wallet(models.Model):
             cursor.execute(sql)
             return cursor.fetchone()[0]
         else:
-            sql="""
+            sql = """
              SELECT IFNULL((SELECT SUM(least_received_confirmed) FROM django_bitcoin_bitcoinaddress ba WHERE ba.wallet_id=%(id)s AND ba.migrated_to_transactions=0), 0)
             + IFNULL((SELECT SUM(amount) FROM django_bitcoin_wallettransaction wt WHERE wt.to_wallet_id=%(id)s), 0)
             - IFNULL((SELECT SUM(amount) FROM django_bitcoin_wallettransaction wt WHERE wt.from_wallet_id=%(id)s), 0) as total_balance;
@@ -822,9 +831,15 @@ class Wallet(models.Model):
     def total_balance_historical(self, balance_date, minconf=settings.BITCOIN_MINIMUM_CONFIRMATIONS):
         if settings.BITCOIN_TRANSACTION_SIGNALING:
             if minconf == settings.BITCOIN_MINIMUM_CONFIRMATIONS:
-                s = self.addresses.filter(created_at__lte=balance_date, migrated_to_transactions=False).aggregate(models.Sum("least_received_confirmed"))['least_received_confirmed__sum'] or Decimal(0)
+                s = self.addresses.filter(
+                    created_at__lte=balance_date,
+                    migrated_to_transactions=False).aggregate(
+                    models.Sum("least_received_confirmed"))['least_received_confirmed__sum'] or Decimal(0)
             elif minconf == 0:
-                s = self.addresses.filter(created_at__lte=balance_date, migrated_to_transactions=False).aggregate(models.Sum("least_received"))['least_received__sum'] or Decimal(0)
+                s = self.addresses.filter(
+                    created_at__lte=balance_date,
+                    migrated_to_transactions=False).aggregate(
+                    models.Sum("least_received"))['least_received__sum'] or Decimal(0)
             else:
                 s = sum([a.received(minconf=minconf) for a in self.addresses.filter(created_at__lte=balance_date, migrated_to_transactions=False)])
         else:
@@ -851,7 +866,9 @@ class Wallet(models.Model):
         """Returns the raw ammount ever received by this wallet."""
         if settings.BITCOIN_TRANSACTION_SIGNALING:
             if minconf == settings.BITCOIN_MINIMUM_CONFIRMATIONS:
-                s = self.addresses.filter(migrated_to_transactions=False).aggregate(models.Sum("least_received_confirmed"))['least_received_confirmed__sum'] or Decimal(0)
+                s = self.addresses.filter(
+                    migrated_to_transactions=False).aggregate(
+                    models.Sum("least_received_confirmed"))['least_received_confirmed__sum'] or Decimal(0)
             elif minconf == 0:
                 s = self.addresses.all().aggregate(models.Sum("least_received"))['least_received__sum'] or Decimal(0)
             else:
@@ -879,75 +896,68 @@ class Wallet(models.Model):
         return False
 
     def merge_wallet(self, other_wallet):
-        if self.id>0 and other_wallet.id>0:
+        if self.id > 0 and other_wallet.id > 0:
             from django.db import connection, transaction
             cursor = connection.cursor()
-            cursor.execute("UPDATE django_bitcoin_bitcoinaddress SET wallet_id="+str(other_wallet.id)+\
-                " WHERE wallet_id="+str(self.id))
-            cursor.execute("UPDATE django_bitcoin_wallettransaction SET from_wallet_id="+str(other_wallet.id)+\
-                " WHERE from_wallet_id="+str(self.id))
-            cursor.execute("UPDATE django_bitcoin_wallettransaction SET to_wallet_id="+str(other_wallet.id)+\
-                " WHERE to_wallet_id="+str(self.id))
+            cursor.execute("UPDATE django_bitcoin_bitcoinaddress SET wallet_id=" + str(other_wallet.id) +
+                           " WHERE wallet_id=" + str(self.id))
+            cursor.execute("UPDATE django_bitcoin_wallettransaction SET from_wallet_id=" + str(other_wallet.id) +
+                           " WHERE from_wallet_id=" + str(self.id))
+            cursor.execute("UPDATE django_bitcoin_wallettransaction SET to_wallet_id=" + str(other_wallet.id) +
+                           " WHERE to_wallet_id=" + str(self.id))
             cursor.execute("DELETE FROM django_bitcoin_wallettransaction WHERE to_wallet_id=from_wallet_id")
             transaction.commit_unless_managed()
 
 
-
 def refill_payment_queue():
-    c=BitcoinAddress.objects.filter(active=False, wallet=None).count()
+    c = BitcoinAddress.objects.filter(active=False, wallet=None).count()
     # print "count", c
-    if settings.BITCOIN_ADDRESS_BUFFER_SIZE>c:
-        for i in range(0,settings.BITCOIN_ADDRESS_BUFFER_SIZE-c):
-            BitcoinAddress.objects.create(address = bitcoind.create_address(), active=False)
+    if settings.BITCOIN_ADDRESS_BUFFER_SIZE > c:
+        for i in range(0, settings.BITCOIN_ADDRESS_BUFFER_SIZE - c):
+            BitcoinAddress.objects.create(address=bitcoind.create_address(), active=False)
 
 
 def update_payments():
     if not cache.get('last_full_check'):
         cache.set('bitcoinprice', cache.get('bitcoinprice_old'))
-    bps=BitcoinPayment.objects.filter(active=True)
+    bps = BitcoinPayment.objects.filter(active=True)
     for bp in bps:
-        bp.amount_paid=Decimal(bitcoind.total_received(bp.address))
+        bp.amount_paid = Decimal(bitcoind.total_received(bp.address))
         bp.save()
         print bp.amount
         print bp.amount_paid
 
+
 @db_transaction.commit_on_success
 def new_bitcoin_payment(amount):
-    bp=BitcoinPayment.objects.filter(active=False)
-    if len(bp)<1:
+    bp = BitcoinPayment.objects.filter(active=False)
+    if len(bp) < 1:
         refill_payment_queue()
-        bp=BitcoinPayment.objects.filter(active=False)
-    bp=bp[0]
-    bp.active=True
-    bp.amount=amount
+        bp = BitcoinPayment.objects.filter(active=False)
+    bp = bp[0]
+    bp.active = True
+    bp.amount = amount
     bp.save()
     return bp
+
 
 def getNewBitcoinPayment(amount):
     warnings.warn("Use new_bitcoin_payment(amount) instead",
                   DeprecationWarning)
     return new_bitcoin_payment(amount)
 
+
 @db_transaction.commit_on_success
 def new_bitcoin_payment_eur(amount):
-    return new_bitcoin_payment(Decimal(amount)/Decimal(currency.exchange.get_rate("EUR")))
+    return new_bitcoin_payment(Decimal(amount) / Decimal(currency.exchange.get_rate("EUR")))
+
 
 def getNewBitcoinPayment_eur(amount):
     return new_bitcoin_payment_eur(amount)
 
-# initialize the conversion module
-
-from django_bitcoin import currency
-
-from django.core import urlresolvers
-from django.utils import importlib
-
-for dottedpath in settings.BITCOIN_CURRENCIES:
-    mod, func = urlresolvers.get_mod_func(dottedpath)
-    klass = getattr(importlib.import_module(mod), func)
-    currency.exchange.register_currency(klass())
 
 # Historical prie storage
+
 
 class HistoricalPrice(models.Model):
     created_at = models.DateTimeField(auto_now_add=True)
@@ -962,17 +972,19 @@ class HistoricalPrice(models.Model):
     def __unicode__(self):
         return str(self.created_at) + " - " + str(self.price) + " - " + str(self.params)
 
+
 def set_historical_price(curr="EUR"):
     markets = currency.markets_chart()
     # print markets
-    markets_currency = sorted(filter(lambda m: m['currency']==curr and m['volume']>1 and not m['symbol'].startswith("mtgox"),
-        markets.values()), key=lambda m: -m['volume'])[:3]
+    markets_currency = sorted(filter(lambda m: m['currency'] == curr and m['volume'] > 1 and not m['symbol'].startswith("mtgox"),
+                                     markets.values()), key=lambda m: -m['volume'])[:3]
     # print markets_currency
     price = sum([m['avg'] for m in markets_currency]) / len(markets_currency)
-    hp = HistoricalPrice.objects.create(price=Decimal(str(price)), params=",".join([m['symbol']+"_avg" for m in markets_currency]), currency=curr,
-            created_at=timezone.now())
-    print "Created new",hp
+    hp = HistoricalPrice.objects.create(price=Decimal(str(price)), params=",".join([m['symbol'] + "_avg" for m in markets_currency]), currency=curr,
+                                        created_at=timezone.now())
+    print "Created new", hp
     return hp
+
 
 def get_historical_price_object(dt=None, curr="EUR"):
     query = HistoricalPrice.objects.filter(currency=curr)
@@ -984,18 +996,17 @@ def get_historical_price_object(dt=None, curr="EUR"):
             return None
     try:
         # print timezone.now()
-        query=HistoricalPrice.objects.filter(currency=curr,
-            created_at__gte=timezone.now() - datetime.timedelta(minutes=settings.HISTORICALPRICES_FETCH_TIMESPAN_MINUTES)).\
+        query = HistoricalPrice.objects.filter(currency=curr,
+                                               created_at__gte=timezone.now() - datetime.timedelta(minutes=settings.HISTORICALPRICES_FETCH_TIMESPAN_MINUTES)).\
             order_by("-created_at")
         # print query
         return query[0]
     except IndexError:
         return set_historical_price()
 
+
 def get_historical_price(dt=None, curr="EUR"):
     return get_historical_price_object().price
-
-
 
 
 # EOF
