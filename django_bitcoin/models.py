@@ -822,41 +822,35 @@ class HistoricalPrice(models.Model):
     def __unicode__(self):
         return str(self.created_at) + " - " + str(self.price) + " - " + str(self.params)
 
+    @classmethod
+    def set_historical_price(self, curr="EUR"):
+        markets = currency.markets_chart()
+        # print markets
+        markets_currency = sorted(filter(lambda m: m['currency'] == curr and m['volume'] > 1 and not m['symbol'].startswith("mtgox"),
+                                         markets.values()), key=lambda m: -m['volume'])[:3]
+        # print markets_currency
+        price = sum([m['avg'] for m in markets_currency]) / len(markets_currency)
+        hp = HistoricalPrice.objects.create(price=Decimal(str(price)), params=",".join([m['symbol'] + "_avg" for m in markets_currency]), currency=curr,
+                                            created_at=timezone.now())
+        print "Created new", hp
+        return hp
 
-def set_historical_price(curr="EUR"):
-    markets = currency.markets_chart()
-    # print markets
-    markets_currency = sorted(filter(lambda m: m['currency'] == curr and m['volume'] > 1 and not m['symbol'].startswith("mtgox"),
-                                     markets.values()), key=lambda m: -m['volume'])[:3]
-    # print markets_currency
-    price = sum([m['avg'] for m in markets_currency]) / len(markets_currency)
-    hp = HistoricalPrice.objects.create(price=Decimal(str(price)), params=",".join([m['symbol'] + "_avg" for m in markets_currency]), currency=curr,
-                                        created_at=timezone.now())
-    print "Created new", hp
-    return hp
-
-
-def get_historical_price_object(dt=None, curr="EUR"):
-    query = HistoricalPrice.objects.filter(currency=curr)
-    if dt:
+    @classmethod
+    def get_historical_price_object(self, dt=None, curr="EUR"):
+        query = HistoricalPrice.objects.filter(currency=curr)
+        if dt:
+            try:
+                query = query.filter(created_at__lte=dt).order_by("-created_at")
+                return query[0]
+            except IndexError:
+                return None
         try:
-            query = query.filter(created_at__lte=dt).order_by("-created_at")
+            # print timezone.now()
+            query = HistoricalPrice.objects.filter(currency=curr,
+                                                   created_at__gte=timezone.now() - datetime.timedelta(minutes=settings.HISTORICALPRICES_FETCH_TIMESPAN_MINUTES)).\
+                order_by("-created_at")
+            # print query
             return query[0]
         except IndexError:
-            return None
-    try:
-        # print timezone.now()
-        query = HistoricalPrice.objects.filter(currency=curr,
-                                               created_at__gte=timezone.now() - datetime.timedelta(minutes=settings.HISTORICALPRICES_FETCH_TIMESPAN_MINUTES)).\
-            order_by("-created_at")
-        # print query
-        return query[0]
-    except IndexError:
-        return set_historical_price()
+            return self.set_historical_price()
 
-
-def get_historical_price(dt=None, curr="EUR"):
-    return get_historical_price_object().price
-
-
-# EOF
