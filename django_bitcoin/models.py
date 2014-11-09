@@ -472,7 +472,7 @@ class Payment(models.Model):
         return bitcoind.total_received(self.address, minconf=minconf)
 
     def update_payment(self, minconf=1):
-        new_amount=Decimal(bitcoin_getbalance(self.address, minconf=minconf))
+        new_amount=Decimal(bitcoind.total_received(self.address, minconf=minconf))
         print "blaa", new_amount, self.address
         if new_amount>=self.amount:
             self.amount_paid=new_amount
@@ -907,7 +907,7 @@ def update_payments():
         cache.set('bitcoinprice', cache.get('bitcoinprice_old'))
     bps=BitcoinPayment.objects.filter(active=True)
     for bp in bps:
-        bp.amount_paid=Decimal(bitcoin_getbalance(bp.address))
+        bp.amount_paid=Decimal(bitcoind.total_received(bp.address))
         bp.save()
         print bp.amount
         print bp.amount_paid
@@ -931,8 +931,7 @@ def getNewBitcoinPayment(amount):
 
 @transaction.commit_on_success
 def new_bitcoin_payment_eur(amount):
-    print bitcoinprice_eur()
-    return new_bitcoin_payment(Decimal(amount)/Decimal(bitcoinprice_eur()['24h']))
+    return new_bitcoin_payment(Decimal(amount)/Decimal(currency.exchange.get_rate("EUR")))
 
 def getNewBitcoinPayment_eur(amount):
     return new_bitcoin_payment_eur(amount)

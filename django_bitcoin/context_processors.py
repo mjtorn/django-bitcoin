@@ -1,6 +1,9 @@
-from django_bitcoin.models import bitcoinprice_eur, bitcoinprice_usd
+from . import currency
+
 
 def bitcoinprice(request):
-    return {'bitcoinprice_eur': bitcoinprice_eur(),
-        'bitcoinprice_usd': bitcoinprice_usd(),
-        }
+    return {
+        'bitcoinprice_eur': currency.exchange.get_rate("EUR"),
+        'bitcoinprice_usd': currency.exchange.get_rate("USD"),
+    }
+

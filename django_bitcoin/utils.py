@@ -11,7 +11,6 @@ import hashlib
 import base64
 from decimal import Decimal
 import decimal
-import warnings
 
 from django.core.cache import cache
 from django.db import transaction
@@ -121,45 +120,6 @@ class BitcoindConnection(object):
 bitcoind = BitcoindConnection(settings.BITCOIND_CONNECTION_STRING,
                               settings.MAIN_ACCOUNT)
 
-def bitcoin_getnewaddress(account_name=None):
-    warnings.warn("Use bitcoind.create_address(...) instead",
-                  DeprecationWarning)
-    return bitcoind.create_address(account_name=account_name)
-
-def bitcoin_getbalance(address, minconf=1):
-    warnings.warn("Use bitcoind.total_received(...) instead",
-                  DeprecationWarning)
-    return bitcoind.total_received(address, minconf)
-
-def bitcoin_getreceived(address, minconf=settings.BITCOIN_MINIMUM_CONFIRMATIONS):
-    warnings.warn("Use bitcoind.total_received(...) instead",
-                  DeprecationWarning)
-    return bitcoind.total_received(address, minconf)
-
-def bitcoin_sendtoaddress(address, amount):
-    warnings.warn("Use bitcoind.send(...) instead",
-                  DeprecationWarning)
-    return bitcoind.send(address, amount)
-
-# --------
-
-def bitcoinprice_usd():
-    """return bitcoin price from any service we can get it"""
-    warnings.warn("Use django_bitcoin.currency.exchange.get_rate('USD')",
-                  DeprecationWarning)
-    return {"24h": currency.exchange.get_rate("USD")}
-
-def bitcoinprice_eur():
-    warnings.warn("Use django_bitcoin.currency.exchange.get_rate('EUR')",
-                  DeprecationWarning)
-    return {"24h": currency.exchange.get_rate("EUR")}
-
-def bitcoinprice(currency):
-    warnings.warn("Use django_bitcoin.currency.exchange.get_rate(currency)",
-                  DeprecationWarning)
-    return currency.exchange.get_rate(currency)
-
-# ------
 
 # generate a random hash
 def generateuniquehash(length=43, extradata=''):
