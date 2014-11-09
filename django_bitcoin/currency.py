@@ -50,9 +50,6 @@ RATE_PERIOD_CHOICES = ("24h", "7d", "30d",)
 
 MARKET_PARAMETERS = ('high', 'low', 'bid', 'ask', 'close',)
 
-MTGOX_CURRENCIES = ("USD", "EUR", "AUD", "CAD", "CHF", "CNY", "DKK",
-    "GBP", "HKD", "JPY", "NZD", "PLN", "RUB", "SEK", "SGD", "THB")
-
 
 class ConversionError(Exception):
     pass
@@ -243,24 +240,6 @@ def markets_chart():
 
         cache.set(cache_key_old, cache.get(cache_key), 60 * 60 * 24 * 7)
     return cache.get(cache_key)
-
-
-def get_mtgox_rate_table():
-    cache_key_old = "bitcoincharts_all_old"
-    old_table = cache.get(cache_key_old)
-    if not old_table:
-        old_table = {}
-        for c in MTGOX_CURRENCIES:
-            old_table[c] = {'24h': None, '7d': None, '30d': None}
-    for c in MTGOX_CURRENCIES:
-        try:
-            f = urllib2.urlopen(
-                u"https://mtgox.com/api/1/BTC" + c + "/ticker")
-            result = f.read()
-            j = json.loads(result)
-            old_table[c]['24h'] = Decimal(j['vwap']['value'])
-        except Exception, err:
-            print "Unexpected error:", sys.exc_info()[0], err
 
 
 def get_rate_table():
